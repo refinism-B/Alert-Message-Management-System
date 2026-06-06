@@ -141,10 +141,37 @@ async function selectDate(date) {
   renderReports(reports);
 }
 
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  const dateFrom = document.getElementById('date-from').value;
+  const dateTo = document.getElementById('date-to').value;
+  let url = `/api/search?q=${encodeURIComponent(q)}`;
+  if (dateFrom) url += `&date_from=${dateFrom}`;
+  if (dateTo) url += `&date_to=${dateTo}`;
+  const data = await api('GET', url);
+  isSearchMode = true;
+  document.getElementById('sidebar').classList.add('disabled');
+  document.getElementById('clear-search-btn').style.display = '';
+  document.getElementById('copy-all-btn').style.display = 'none';
+  document.getElementById('main-title').textContent = `搜尋「${q}」— ${data.reports.length} 筆結果`;
+  renderReports(data.reports, true);
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  document.getElementById('date-from').value = '';
+  document.getElementById('date-to').value = '';
+  selectDate(currentDate);
+}
+
 async function init() {
   schemaFields = (await api('GET', '/api/schema')).fields;
   await loadDates();
   await selectDate(today);
+  document.getElementById('search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
 }
 
 function renderReports(reports, searchMode = false) {
