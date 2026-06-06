@@ -286,9 +286,10 @@ function buildForm(fields, order, onSave, onCancel) {
     <div class="preview-area"></div>
     <div class="card-actions">
       <button class="btn btn-primary btn-sm save-btn">💾 儲存</button>
-      <button class="btn btn-secondary btn-sm" onclick="cancelForm()">取消</button>
+      <button class="btn btn-secondary btn-sm cancel-btn">取消</button>
     </div>`;
   div.querySelector('.save-btn').onclick = () => onSave(div);
+  div.querySelector('.cancel-btn').onclick = onCancel;
   bindDrag(div);
   updatePreview(div);
   div.querySelectorAll('.field-input').forEach(i => i.addEventListener('input', () => updatePreview(div)));
