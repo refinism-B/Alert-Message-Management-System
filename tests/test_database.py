@@ -37,6 +37,10 @@ def test_create_and_get_report():
     assert report["id"] is not None
     assert report["date"] == "2026-06-06"
     assert report["fields"]["Offense ID"] == "OFN-001"
+    # Test the get side: verify report appears in get_reports_by_date
+    reports = database.get_reports_by_date("2026-06-06")
+    assert len(reports) == 1
+    assert reports[0]["id"] == report["id"]
 
 def test_get_reports_by_date():
     database.create_report("2026-06-06", {"Offense ID": "A"}, ["Offense ID"])
@@ -44,6 +48,9 @@ def test_get_reports_by_date():
     database.create_report("2026-06-05", {"Offense ID": "C"}, ["Offense ID"])
     reports = database.get_reports_by_date("2026-06-06")
     assert len(reports) == 2
+    # Verify ordering: reports come back in created_at ASC order
+    assert reports[0]["fields"]["Offense ID"] == "A"
+    assert reports[1]["fields"]["Offense ID"] == "B"
 
 def test_get_dates():
     database.create_report("2026-06-06", {"x": "1"}, ["x"])
@@ -55,6 +62,8 @@ def test_update_report():
     report = database.create_report("2026-06-06", {"Offense ID": "OLD"}, ["Offense ID"])
     updated = database.update_report(report["id"], {"Offense ID": "NEW"}, ["Offense ID"])
     assert updated["fields"]["Offense ID"] == "NEW"
+    # Verify updated_at advances
+    assert updated["updated_at"] >= updated["created_at"]
 
 def test_delete_report():
     report = database.create_report("2026-06-06", {"x": "1"}, ["x"])
