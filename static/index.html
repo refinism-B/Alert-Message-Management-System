@@ -85,9 +85,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
       <div id="main-actions">
         <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
         <button id="copy-all-btn" class="btn btn-success btn-sm" onclick="copyAll()">📋 複製當日全部</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleSchemaPanel()">⚙️ 欄位管理</button>
       </div>
     </div>
     <div id="add-form-container" style="display:none"></div>
+    <div id="schema-panel" style="display:none;margin-bottom:16px" class="report-card"></div>
     <div id="reports-container"></div>
   </div>
 </div>
@@ -163,6 +165,54 @@ function clearSearch() {
   document.getElementById('date-from').value = '';
   document.getElementById('date-to').value = '';
   selectDate(currentDate);
+}
+
+async function toggleSchemaPanel() {
+  const panel = document.getElementById('schema-panel');
+  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  renderSchemaPanel();
+}
+
+function renderSchemaPanel() {
+  const panel = document.getElementById('schema-panel');
+  const rows = schemaFields.map((f, i) => `
+    <div class="schema-row" data-index="${i}" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <input class="field-input" value="${f}" style="flex:1" oninput="schemaFields[${i}]=this.value">
+      <button class="btn btn-secondary btn-sm" onclick="schemaRowUp(${i})">↑</button>
+      <button class="btn btn-danger btn-sm" onclick="schemaFields.splice(${i},1);renderSchemaPanel()">✕</button>
+    </div>`).join('');
+  panel.innerHTML = `
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#94a3b8">⚙️ 預設欄位管理</div>
+    <div id="schema-rows">${rows}</div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="new-field-input" class="field-input" placeholder="新欄位名稱" style="flex:1">
+      <button class="btn btn-success btn-sm" onclick="addSchemaField()">＋ 新增</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" onclick="saveSchema()">💾 儲存</button>
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('schema-panel').style.display='none'">取消</button>
+    </div>`;
+}
+
+function schemaRowUp(i) {
+  if (i === 0) return;
+  [schemaFields[i-1], schemaFields[i]] = [schemaFields[i], schemaFields[i-1]];
+  renderSchemaPanel();
+}
+
+function addSchemaField() {
+  const input = document.getElementById('new-field-input');
+  const val = input.value.trim();
+  if (!val) return;
+  schemaFields.push(val);
+  input.value = '';
+  renderSchemaPanel();
+}
+
+async function saveSchema() {
+  await api('PUT', '/api/schema', { fields: schemaFields });
+  document.getElementById('schema-panel').style.display = 'none';
 }
 
 async function init() {
