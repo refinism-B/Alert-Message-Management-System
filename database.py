@@ -116,3 +116,26 @@ def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict 
 def delete_report(report_id: int) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+
+
+def search_reports(q: str, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
+    sql = "SELECT * FROM reports WHERE 1=1"
+    params: list = []
+    if date_from:
+        sql += " AND date >= ?"
+        params.append(date_from)
+    if date_to:
+        sql += " AND date <= ?"
+        params.append(date_to)
+    sql += " ORDER BY date DESC, created_at ASC"
+
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    q_lower = q.lower()
+    results = []
+    for row in rows:
+        fields = json.loads(row["fields"])
+        if any(q_lower in str(v).lower() for v in fields.values()):
+            results.append(_row_to_report(row))
+    return results

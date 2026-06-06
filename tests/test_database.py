@@ -74,3 +74,34 @@ def test_delete_report():
 def test_update_nonexistent_report_returns_none():
     result = database.update_report(9999, {"x": "1"}, ["x"])
     assert result is None
+
+def test_search_by_keyword_matches_values():
+    database.create_report("2026-06-06", {"來源IP": "192.168.1.100", "Offense ID": "OFN-001"}, ["來源IP", "Offense ID"])
+    database.create_report("2026-06-06", {"來源IP": "10.0.0.1", "Offense ID": "OFN-002"}, ["來源IP", "Offense ID"])
+    results = database.search_reports("192.168")
+    assert len(results) == 1
+    assert results[0]["fields"]["來源IP"] == "192.168.1.100"
+
+def test_search_case_insensitive():
+    database.create_report("2026-06-06", {"Offense ID": "OFN-001"}, ["Offense ID"])
+    results = database.search_reports("ofn-001")
+    assert len(results) == 1
+
+def test_search_does_not_match_keys():
+    database.create_report("2026-06-06", {"來源IP": "1.2.3.4"}, ["來源IP"])
+    results = database.search_reports("來源IP")
+    assert len(results) == 0
+
+def test_search_with_date_range():
+    database.create_report("2026-06-01", {"Offense ID": "OFN-001"}, ["Offense ID"])
+    database.create_report("2026-06-05", {"Offense ID": "OFN-001"}, ["Offense ID"])
+    database.create_report("2026-06-10", {"Offense ID": "OFN-001"}, ["Offense ID"])
+    results = database.search_reports("OFN-001", date_from="2026-06-02", date_to="2026-06-09")
+    assert len(results) == 1
+    assert results[0]["date"] == "2026-06-05"
+
+def test_search_no_date_range_returns_all_dates():
+    database.create_report("2026-06-01", {"Offense ID": "OFN-999"}, ["Offense ID"])
+    database.create_report("2026-06-10", {"Offense ID": "OFN-999"}, ["Offense ID"])
+    results = database.search_reports("OFN-999")
+    assert len(results) == 2
