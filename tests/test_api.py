@@ -1,5 +1,4 @@
 import pytest
-import json
 from fastapi.testclient import TestClient
 import database
 
