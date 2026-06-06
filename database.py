@@ -32,23 +32,25 @@ def init_db() -> None:
             )
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS schema (
+            CREATE TABLE IF NOT EXISTS field_schema (
                 id INTEGER PRIMARY KEY,
                 fields TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
-        exists = conn.execute("SELECT id FROM schema WHERE id = 1").fetchone()
+        exists = conn.execute("SELECT id FROM field_schema WHERE id = 1").fetchone()
         if not exists:
             conn.execute(
-                "INSERT INTO schema (id, fields, updated_at) VALUES (1, ?, ?)",
+                "INSERT INTO field_schema (id, fields, updated_at) VALUES (1, ?, ?)",
                 (json.dumps(DEFAULT_FIELDS, ensure_ascii=False), _now()),
             )
 
 
 def get_schema() -> dict:
     with get_conn() as conn:
-        row = conn.execute("SELECT fields, updated_at FROM schema WHERE id = 1").fetchone()
+        row = conn.execute("SELECT fields, updated_at FROM field_schema WHERE id = 1").fetchone()
+    if row is None:
+        raise RuntimeError("Schema row missing — was init_db() called?")
     return {"fields": json.loads(row["fields"]), "updated_at": row["updated_at"]}
 
 
@@ -56,7 +58,7 @@ def update_schema(fields: list[str]) -> dict:
     now = _now()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE schema SET fields = ?, updated_at = ? WHERE id = 1",
+            "UPDATE field_schema SET fields = ?, updated_at = ? WHERE id = 1",
             (json.dumps(fields, ensure_ascii=False), now),
         )
     return {"fields": fields, "updated_at": now}

@@ -1,9 +1,7 @@
 import pytest
-import json
-import tempfile
 from pathlib import Path
 
-# Patch DB_PATH before importing database
+# DB_PATH is redirected to a temp file by the autouse fixture before each test
 import database
 
 @pytest.fixture(autouse=True)
@@ -17,7 +15,7 @@ def test_init_db_creates_tables():
     conn = sqlite3.connect(database.DB_PATH)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert "reports" in tables
-    assert "schema" in tables
+    assert "field_schema" in tables
     conn.close()
 
 def test_init_db_seeds_default_schema():
@@ -28,3 +26,4 @@ def test_update_schema():
     database.update_schema(["欄位A", "欄位B"])
     schema = database.get_schema()
     assert schema["fields"] == ["欄位A", "欄位B"]
+    assert schema["updated_at"]
