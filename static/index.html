@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>SOC Reporter</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
+
+/* Top bar */
+#topbar { background: #1e293b; border-bottom: 1px solid #334155; padding: 10px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+#topbar .brand { font-weight: 700; color: #f8fafc; white-space: nowrap; margin-right: 8px; }
+#search-input { flex: 1; max-width: 260px; padding: 6px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 13px; }
+#search-input::placeholder { color: #475569; }
+.date-input { width: 110px; padding: 6px 8px; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 13px; }
+.sep { color: #475569; font-size: 13px; }
+.btn { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-primary { background: #1e40af; color: #fff; }
+.btn-primary:hover { background: #2563eb; }
+.btn-secondary { background: #1e293b; border: 1px solid #334155; color: #cbd5e1; }
+.btn-secondary:hover { background: #334155; }
+.btn-danger { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
+.btn-danger:hover { background: #7f1d1d; }
+.btn-success { background: #064e3b; color: #6ee7b7; border: none; }
+.btn-success:hover { background: #065f46; }
+.btn-sm { padding: 3px 8px; font-size: 12px; }
+
+/* Layout */
+#layout { display: flex; flex: 1; overflow: hidden; }
+
+/* Sidebar */
+#sidebar { width: 150px; background: #0f172a; border-right: 1px solid #1e293b; overflow-y: auto; flex-shrink: 0; padding: 12px 8px; }
+#sidebar .sidebar-label { font-size: 11px; text-transform: uppercase; color: #475569; padding: 0 6px; margin-bottom: 8px; letter-spacing: 0.05em; }
+#sidebar.disabled { opacity: 0.4; pointer-events: none; }
+.date-item { padding: 7px 8px; border-radius: 4px; font-size: 13px; cursor: pointer; color: #94a3b8; margin-bottom: 2px; }
+.date-item:hover { background: #1e293b; color: #e2e8f0; }
+.date-item.active { background: #1e40af; color: #fff; }
+
+/* Main */
+#main { flex: 1; overflow-y: auto; padding: 20px; }
+#main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+#main-title { font-size: 14px; color: #94a3b8; }
+#main-actions { display: flex; gap: 8px; }
+
+/* Report card */
+.report-card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 14px; margin-bottom: 10px; }
+.report-card.editing { border-color: #3b82f6; }
+.report-fields { display: grid; grid-template-columns: 140px 1fr; gap: 4px 8px; font-size: 13px; margin-bottom: 10px; }
+.field-label { color: #64748b; }
+.field-value { color: #e2e8f0; }
+.field-input { width: 100%; padding: 4px 8px; background: #0f172a; border: 1px solid #334155; border-radius: 3px; color: #e2e8f0; font-size: 13px; }
+.card-actions { display: flex; gap: 6px; }
+.edit-label { font-size: 11px; color: #3b82f6; margin-bottom: 8px; }
+
+/* Search results */
+.search-date-tag { font-size: 11px; color: #3b82f6; margin-bottom: 4px; }
+#no-results { text-align: center; color: #475569; padding: 40px; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="topbar">
+  <span class="brand">SOC Reporter</span>
+  <input id="search-input" type="text" placeholder="🔍 搜尋 IP / Offense ID...">
+  <span class="sep">日期區間</span>
+  <input id="date-from" class="date-input" type="date">
+  <span class="sep">～</span>
+  <input id="date-to" class="date-input" type="date">
+  <button class="btn btn-primary" onclick="doSearch()">搜尋</button>
+  <button id="clear-search-btn" class="btn btn-secondary" style="display:none" onclick="clearSearch()">✕ 清除</button>
+</div>
+
+<div id="layout">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="sidebar-label">日期</div>
+    <div id="date-list"></div>
+  </div>
+
+  <!-- Main content -->
+  <div id="main">
+    <div id="main-header">
+      <span id="main-title">載入中...</span>
+      <div id="main-actions">
+        <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
+        <button id="copy-all-btn" class="btn btn-success btn-sm" onclick="copyAll()">📋 複製當日全部</button>
+      </div>
+    </div>
+    <div id="add-form-container" style="display:none"></div>
+    <div id="reports-container"></div>
+  </div>
+</div>
+
+<script>
+let currentDate = null;
+let currentReports = [];
+let schemaFields = [];
+let isSearchMode = false;
+
+const today = new Date().toISOString().split('T')[0];
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function loadDates() {
+  const dates = await api('GET', '/api/dates');
+  const list = document.getElementById('date-list');
+  list.innerHTML = '';
+  if (!dates.includes(today)) {
+    const item = document.createElement('div');
+    item.className = 'date-item' + (currentDate === today ? ' active' : '');
+    item.textContent = today + ' ●';
+    item.onclick = () => selectDate(today);
+    list.appendChild(item);
+  }
+  dates.forEach(d => {
+    const item = document.createElement('div');
+    item.className = 'date-item' + (currentDate === d ? ' active' : '');
+    item.textContent = d;
+    item.onclick = () => selectDate(d);
+    list.appendChild(item);
+  });
+}
+
+async function selectDate(date) {
+  currentDate = date;
+  isSearchMode = false;
+  document.getElementById('sidebar').classList.remove('disabled');
+  document.getElementById('clear-search-btn').style.display = 'none';
+  document.getElementById('copy-all-btn').style.display = '';
+  await loadDates();
+  const reports = await api('GET', `/api/reports?date=${date}`);
+  currentReports = reports;
+  document.getElementById('main-title').textContent = `${date}　${reports.length} 筆通報`;
+  renderReports(reports);
+}
+
+async function init() {
+  schemaFields = (await api('GET', '/api/schema')).fields;
+  await loadDates();
+  await selectDate(today);
+}
+
+function renderReports(reports, searchMode = false) {
+  const container = document.getElementById('reports-container');
+  container.innerHTML = '';
+  document.getElementById('add-form-container').style.display = 'none';
+  if (reports.length === 0) {
+    container.innerHTML = '<div id="no-results">無通報紀錄</div>';
+    return;
+  }
+  reports.forEach(r => container.appendChild(buildCard(r, searchMode)));
+}
+
+function buildCard(report, showDate = false) {
+  const card = document.createElement('div');
+  card.className = 'report-card';
+  card.id = `card-${report.id}`;
+
+  let html = '';
+  if (showDate) html += `<div class="search-date-tag">📅 ${report.date}</div>`;
+  html += '<div class="report-fields">';
+  report.field_order.forEach(k => {
+    html += `<span class="field-label">${k}</span><span class="field-value">${report.fields[k] ?? ''}</span>`;
+  });
+  html += '</div>';
+  html += `<div class="card-actions">
+    <button class="btn btn-secondary btn-sm" onclick="copyReport(${report.id})">📋 複製</button>
+    <button class="btn btn-secondary btn-sm" onclick="editReport(${report.id})">✏️ 編輯</button>
+    <button class="btn btn-danger btn-sm" onclick="deleteReport(${report.id})">🗑 刪除</button>
+  </div>`;
+  card.innerHTML = html;
+  card._report = report;
+  return card;
+}
+
+function formatReport(report) {
+  return report.field_order.map(k => `* ${k}：${report.fields[k] ?? ''}`).join('\n');
+}
+
+function copyReport(id) {
+  const card = document.getElementById(`card-${id}`);
+  navigator.clipboard.writeText(formatReport(card._report));
+}
+
+function copyAll() {
+  if (!currentReports.length) return;
+  const text = currentReports.map(r => formatReport(r)).join('\n\n\n');
+  navigator.clipboard.writeText(text);
+}
+
+async function deleteReport(id) {
+  if (!confirm('確定要刪除這筆通報嗎？')) return;
+  await api('DELETE', `/api/reports/${id}`);
+  await selectDate(currentDate);
+}
+
+init();
+</script>
+</body>
+</html>
