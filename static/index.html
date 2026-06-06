@@ -201,6 +201,137 @@ async function deleteReport(id) {
   await selectDate(currentDate);
 }
 
+function buildFieldRows(fields, order) {
+  return order.map((k, i) => `
+    <div class="field-row" data-key="${k}">
+      <span class="drag-handle" draggable="true">⠿</span>
+      <input class="field-input key-input" value="${k}" placeholder="欄位名稱">
+      <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
+      <button class="btn btn-secondary btn-sm" onclick="moveRowUp(this)">↑</button>
+      <button class="btn btn-danger btn-sm" onclick="const fc=this.closest('.form-container'); this.closest('.field-row').remove(); updatePreview(fc)">✕</button>
+    </div>`).join('');
+}
+
+function addFieldRow(container) {
+  const row = document.createElement('div');
+  row.className = 'field-row';
+  row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
+    <input class="field-input key-input" placeholder="欄位名稱">
+    <input class="field-input val-input" placeholder="值">
+    <button class="btn btn-secondary btn-sm" onclick="moveRowUp(this)">↑</button>
+    <button class="btn btn-danger btn-sm" onclick="const fc=this.closest('.form-container'); this.closest('.field-row').remove(); updatePreview(fc)">✕</button>`;
+  container.querySelector('.field-rows').appendChild(row);
+  bindDrag(container);
+}
+
+function moveRowUp(btn) {
+  const row = btn.closest('.field-row');
+  const prev = row.previousElementSibling;
+  if (prev && prev.classList.contains('field-row')) {
+    row.parentNode.insertBefore(row, prev);
+    updatePreview(row.closest('.form-container'));
+  }
+}
+
+function collectFormData(container) {
+  const rows = container.querySelectorAll('.field-row');
+  const fields = {}, order = [];
+  rows.forEach(r => {
+    const k = r.querySelector('.key-input').value.trim();
+    const v = r.querySelector('.val-input').value.trim();
+    if (k) { fields[k] = v; order.push(k); }
+  });
+  return { fields, field_order: order };
+}
+
+function updatePreview(container) {
+  const { fields, field_order } = collectFormData(container);
+  const preview = container.querySelector('.preview-area');
+  preview.textContent = field_order.map(k => `* ${k}：${fields[k] ?? ''}`).join('\n');
+}
+
+function bindDrag(container) {
+  const rows = container.querySelectorAll('.field-row');
+  rows.forEach(row => {
+    row.querySelector('.drag-handle').ondragstart = e => {
+      e.dataTransfer.effectAllowed = 'move';
+      container._dragging = row;
+    };
+    row.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+    row.ondrop = e => {
+      e.preventDefault();
+      const dragging = container._dragging;
+      if (dragging && dragging !== row) {
+        row.parentNode.insertBefore(dragging, row);
+        updatePreview(container);
+      }
+    };
+  });
+}
+
+function buildForm(fields, order, onSave, onCancel) {
+  const div = document.createElement('div');
+  div.className = 'form-container report-card';
+  div.innerHTML = `
+    <style>
+      .field-row { display: grid; grid-template-columns: 20px 1fr 1fr 32px 32px; gap: 6px; align-items: center; margin-bottom: 6px; }
+      .drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
+      .preview-area { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 10px; font-size: 12px; color: #94a3b8; white-space: pre; margin-bottom: 12px; min-height: 40px; }
+      .form-container .form-label { font-size: 11px; color: #475569; margin-bottom: 4px; text-transform: uppercase; }
+    </style>
+    <div class="field-rows">${buildFieldRows(fields, order)}</div>
+    <button class="btn btn-success btn-sm" style="margin-bottom:12px" onclick="addFieldRow(this.closest('.form-container'))">＋ 新增欄位</button>
+    <div class="form-label">輸出預覽</div>
+    <div class="preview-area"></div>
+    <div class="card-actions">
+      <button class="btn btn-primary btn-sm save-btn">💾 儲存</button>
+      <button class="btn btn-secondary btn-sm" onclick="cancelForm()">取消</button>
+    </div>`;
+  div.querySelector('.save-btn').onclick = () => onSave(div);
+  bindDrag(div);
+  updatePreview(div);
+  div.querySelectorAll('.field-input').forEach(i => i.addEventListener('input', () => updatePreview(div)));
+  return div;
+}
+
+function cancelForm() {
+  document.getElementById('add-form-container').style.display = 'none';
+  document.getElementById('add-form-container').innerHTML = '';
+}
+
+function openAddForm() {
+  const container = document.getElementById('add-form-container');
+  container.style.display = 'block';
+  container.innerHTML = '';
+  const emptyFields = Object.fromEntries(schemaFields.map(k => [k, '']));
+  const form = buildForm(emptyFields, schemaFields,
+    async (div) => {
+      const { fields, field_order } = collectFormData(div);
+      await api('POST', '/api/reports', { date: currentDate, fields, field_order });
+      await selectDate(currentDate);
+    },
+    cancelForm
+  );
+  container.appendChild(form);
+}
+
+function editReport(id) {
+  const card = document.getElementById(`card-${id}`);
+  const report = card._report;
+  card.classList.add('editing');
+  card.innerHTML = '<div class="edit-label">編輯中</div>';
+  const form = buildForm(report.fields, report.field_order,
+    async (div) => {
+      const { fields, field_order } = collectFormData(div);
+      await api('PUT', `/api/reports/${id}`, { fields, field_order });
+      await selectDate(currentDate);
+    },
+    async () => { await selectDate(currentDate); }
+  );
+  card.appendChild(form);
+}
+
 init();
 </script>
 </body>
