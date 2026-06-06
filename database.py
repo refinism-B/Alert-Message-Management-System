@@ -62,3 +62,57 @@ def update_schema(fields: list[str]) -> dict:
             (json.dumps(fields, ensure_ascii=False), now),
         )
     return {"fields": fields, "updated_at": now}
+
+
+def _row_to_report(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "date": row["date"],
+        "fields": json.loads(row["fields"]),
+        "field_order": json.loads(row["field_order"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def create_report(date: str, fields: dict, field_order: list[str]) -> dict:
+    now = _now()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO reports (date, fields, field_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (date, json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, now),
+        )
+        row = conn.execute("SELECT * FROM reports WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return _row_to_report(row)
+
+
+def get_reports_by_date(date: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reports WHERE date = ? ORDER BY created_at ASC", (date,)
+        ).fetchall()
+    return [_row_to_report(r) for r in rows]
+
+
+def get_dates() -> list[str]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT date FROM reports ORDER BY date DESC"
+        ).fetchall()
+    return [r["date"] for r in rows]
+
+
+def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict | None:
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
+        )
+        row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+    return _row_to_report(row) if row else None
+
+
+def delete_report(report_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
