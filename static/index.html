@@ -258,7 +258,7 @@ function buildCard(report, showDate = false) {
 }
 
 function formatReport(report) {
-  return report.field_order.map(k => `* ${k}：${report.fields[k] ?? ''}`).join('\n');
+  return report.field_order.map(k => `- ${k}：${report.fields[k] ?? ''}`).join('\n');
 }
 
 function copyReport(id) {
@@ -325,7 +325,7 @@ function collectFormData(container) {
 function updatePreview(container) {
   const { fields, field_order } = collectFormData(container);
   const preview = container.querySelector('.preview-area');
-  preview.textContent = field_order.map(k => `* ${k}：${fields[k] ?? ''}`).join('\n');
+  preview.textContent = field_order.map(k => `- ${k}：${fields[k] ?? ''}`).join('\n');
 }
 
 function bindDrag(container) {
