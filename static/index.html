@@ -183,19 +183,27 @@ async function selectDate(date) {
 
 async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
-  if (!q) return;
   const dateFrom = document.getElementById('date-from').value;
   const dateTo = document.getElementById('date-to').value;
-  let url = `/api/search?q=${encodeURIComponent(q)}`;
-  if (dateFrom) url += `&date_from=${dateFrom}`;
-  if (dateTo) url += `&date_to=${dateTo}`;
-  const data = await api('GET', url);
+
+  if (!q && !dateFrom && !dateTo) {
+    showToast('請輸入搜尋條件', 'error');
+    return;
+  }
+
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo) params.set('date_to', dateTo);
+
+  const data = await api('GET', `/api/search?${params}`);
   isSearchMode = true;
   document.getElementById('sidebar').classList.add('disabled');
   document.getElementById('clear-search-btn').style.display = '';
   document.getElementById('select-all-btn').style.display = 'none';
   document.getElementById('copy-selected-btn').style.display = 'none';
-  document.getElementById('main-title').textContent = `搜尋「${q}」— ${data.reports.length} 筆結果`;
+  const label = q ? `搜尋「${q}」` : '日期區間搜尋';
+  document.getElementById('main-title').textContent = `${label} — ${data.reports.length} 筆結果`;
   renderReports(data.reports, true);
 }
 
@@ -490,11 +498,18 @@ function editReport(id) {
   const report = card._report;
   card.classList.add('editing');
   card.innerHTML = '<div class="edit-label">編輯中</div>';
-  const form = buildForm(report.fields, report.field_order,
+  const form = buildForm(
+    report.fields,
+    report.field_order,
     async (div) => {
       const { fields, field_order } = collectFormData(div);
-      await api('PUT', `/api/reports/${id}`, { fields, field_order });
-      await selectDate(currentDate);
+      try {
+        await api('PUT', `/api/reports/${id}`, { fields, field_order });
+        showToast('已成功儲存');
+        await selectDate(currentDate);
+      } catch (e) {
+        showToast(`儲存失敗：${e.message}`, 'error');
+      }
     },
     async () => { await selectDate(currentDate); }
   );
