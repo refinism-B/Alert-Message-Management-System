@@ -117,3 +117,9 @@ def test_create_report_duplicate_offense_id_returns_409(client):
     })
     assert r.status_code == 409
     assert "Offense ID 已存在" in r.json()["detail"]
+
+def test_update_report_duplicate_offense_id_returns_409(client):
+    r1 = client.post("/api/reports", json={"date": "2026-06-06", "fields": {"Offense ID": "UPD-001"}, "field_order": ["Offense ID"]}).json()
+    r2 = client.post("/api/reports", json={"date": "2026-06-06", "fields": {"Offense ID": "UPD-002"}, "field_order": ["Offense ID"]}).json()
+    r = client.put(f"/api/reports/{r2['id']}", json={"fields": {"Offense ID": "UPD-001"}, "field_order": ["Offense ID"]})
+    assert r.status_code == 409

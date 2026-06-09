@@ -110,8 +110,15 @@ def get_dates() -> list[str]:
 
 
 def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict | None:
+    offense_id = fields.get("Offense ID", "").strip()
     now = _now()
     with get_conn() as conn:
+        if offense_id:
+            rows = conn.execute("SELECT id, fields FROM reports WHERE id != ?", (report_id,)).fetchall()
+            for row in rows:
+                existing = json.loads(row["fields"])
+                if existing.get("Offense ID", "").strip() == offense_id:
+                    raise ValueError("Offense ID 已存在")
         conn.execute(
             "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
             (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),

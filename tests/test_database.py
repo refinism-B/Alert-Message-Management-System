@@ -133,3 +133,14 @@ def test_create_report_duplicate_offense_id_raises():
             {"Offense ID": "OFN-999"},
             ["Offense ID"],
         )
+
+def test_update_report_duplicate_offense_id_raises():
+    r1 = database.create_report("2026-06-06", {"Offense ID": "EDIT-001"}, ["Offense ID"])
+    r2 = database.create_report("2026-06-06", {"Offense ID": "EDIT-002"}, ["Offense ID"])
+    with pytest.raises(ValueError, match="Offense ID 已存在"):
+        database.update_report(r2["id"], {"Offense ID": "EDIT-001"}, ["Offense ID"])
+
+def test_update_report_same_offense_id_allowed():
+    r = database.create_report("2026-06-06", {"Offense ID": "SELF-001"}, ["Offense ID"])
+    updated = database.update_report(r["id"], {"Offense ID": "SELF-001", "time": "new"}, ["Offense ID", "time"])
+    assert updated["fields"]["time"] == "new"
