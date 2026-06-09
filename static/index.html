@@ -29,9 +29,13 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #layout { display: flex; flex: 1; overflow: hidden; }
 
 /* Sidebar */
-#sidebar { width: 150px; background: #0f172a; border-right: 1px solid #1e293b; overflow-y: auto; flex-shrink: 0; padding: 12px 8px; }
+#sidebar { width: 150px; background: #0f172a; border-right: 1px solid #1e293b; overflow: hidden; flex-shrink: 0; transition: width 0.2s ease; }
+#sidebar.collapsed { width: 32px; }
+#sidebar.disabled .sidebar-inner { opacity: 0.4; pointer-events: none; }
+#sidebar-toggle { width: 100%; background: none; border: none; border-bottom: 1px solid #1e293b; color: #475569; cursor: pointer; padding: 8px 0; font-size: 14px; text-align: center; }
+#sidebar-toggle:hover { color: #e2e8f0; background: #1e293b; }
+.sidebar-inner { padding: 12px 8px; white-space: nowrap; }
 #sidebar .sidebar-label { font-size: 11px; text-transform: uppercase; color: #475569; padding: 0 6px; margin-bottom: 8px; letter-spacing: 0.05em; }
-#sidebar.disabled { opacity: 0.4; pointer-events: none; }
 .date-item { padding: 7px 8px; border-radius: 4px; font-size: 13px; cursor: pointer; color: #94a3b8; margin-bottom: 2px; }
 .date-item:hover { background: #1e293b; color: #e2e8f0; }
 .date-item.active { background: #1e40af; color: #fff; }
@@ -79,8 +83,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 <div id="layout">
   <!-- Sidebar -->
   <div id="sidebar">
-    <div class="sidebar-label">日期</div>
-    <div id="date-list"></div>
+    <button id="sidebar-toggle" onclick="toggleSidebar()">‹</button>
+    <div class="sidebar-inner">
+      <div class="sidebar-label">日期</div>
+      <div id="date-list"></div>
+    </div>
   </div>
 
   <!-- Main content -->
@@ -426,6 +433,13 @@ function editReport(id) {
     async () => { await selectDate(currentDate); }
   );
   card.appendChild(form);
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('collapsed');
+  document.getElementById('sidebar-toggle').textContent =
+    sidebar.classList.contains('collapsed') ? '›' : '‹';
 }
 
 init();
