@@ -130,7 +130,16 @@ async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) {
+    let msg;
+    try {
+      const err = await r.json();
+      msg = err.detail || JSON.stringify(err);
+    } catch {
+      msg = await r.text();
+    }
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -303,15 +312,26 @@ async function deleteReport(id) {
   await selectDate(currentDate);
 }
 
-function buildFieldRows(fields, order) {
-  return order.map((k, i) => `
-    <div class="field-row" data-key="${k}">
-      <span class="drag-handle" draggable="true">⠿</span>
-      <input class="field-input key-input" value="${k}" placeholder="欄位名稱">
-      <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
-      <button class="btn btn-secondary btn-sm" onclick="moveRowUp(this)">↑</button>
-      <button class="btn btn-danger btn-sm" onclick="const fc=this.closest('.form-container'); this.closest('.field-row').remove(); updatePreview(fc)">✕</button>
-    </div>`).join('');
+function buildFieldRows(fields, order, defaultKeys = []) {
+  return order.map((k, i) => {
+    const isDefault = defaultKeys.includes(k);
+    if (isDefault) {
+      return `
+        <div class="field-row default-row" data-key="${k}">
+          <span class="drag-handle" draggable="true">⠿</span>
+          <span class="key-label">${k}</span>
+          <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
+        </div>`;
+    }
+    return `
+      <div class="field-row" data-key="${k}">
+        <span class="drag-handle" draggable="true">⠿</span>
+        <input class="field-input key-input" value="${k}" placeholder="欄位名稱">
+        <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
+        <button class="btn btn-secondary btn-sm" onclick="moveRowUp(this)">↑</button>
+        <button class="btn btn-danger btn-sm" onclick="const fc=this.closest('.form-container'); this.closest('.field-row').remove(); updatePreview(fc)">✕</button>
+      </div>`;
+  }).join('');
 }
 
 function addFieldRow(container) {
@@ -340,7 +360,9 @@ function collectFormData(container) {
   const rows = container.querySelectorAll('.field-row');
   const fields = {}, order = [];
   rows.forEach(r => {
-    const k = r.querySelector('.key-input').value.trim();
+    const keyInput = r.querySelector('.key-input');
+    const keyLabel = r.querySelector('.key-label');
+    const k = keyInput ? keyInput.value.trim() : (keyLabel ? keyLabel.textContent.trim() : '');
     const v = r.querySelector('.val-input').value.trim();
     if (k) { fields[k] = v; order.push(k); }
   });
@@ -372,17 +394,19 @@ function bindDrag(container) {
   });
 }
 
-function buildForm(fields, order, onSave, onCancel) {
+function buildForm(fields, order, onSave, onCancel, defaultKeys = []) {
   const div = document.createElement('div');
   div.className = 'form-container report-card';
   div.innerHTML = `
     <style>
       .field-row { display: grid; grid-template-columns: 20px 1fr 1fr 32px 32px; gap: 6px; align-items: center; margin-bottom: 6px; }
+      .field-row.default-row { grid-template-columns: 20px 1fr 1fr; }
+      .key-label { font-size: 13px; color: #cbd5e1; padding: 4px 8px; }
       .drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
       .preview-area { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 10px; font-size: 12px; color: #94a3b8; white-space: pre; margin-bottom: 12px; min-height: 40px; }
       .form-container .form-label { font-size: 11px; color: #475569; margin-bottom: 4px; text-transform: uppercase; }
     </style>
-    <div class="field-rows">${buildFieldRows(fields, order)}</div>
+    <div class="field-rows">${buildFieldRows(fields, order, defaultKeys)}</div>
     <button class="btn btn-success btn-sm" style="margin-bottom:12px" onclick="addFieldRow(this.closest('.form-container'))">＋ 新增欄位</button>
     <div class="form-label">輸出預覽</div>
     <div class="preview-area"></div>
@@ -407,14 +431,26 @@ function openAddForm() {
   const container = document.getElementById('add-form-container');
   container.style.display = 'block';
   container.innerHTML = '';
-  const emptyFields = Object.fromEntries(schemaFields.map(k => [k, '']));
-  const form = buildForm(emptyFields, schemaFields,
+  const now = new Date();
+  const dateStr = `${now.getMonth() + 1}月${now.getDate()}日`;
+  const initFields = Object.fromEntries(
+    schemaFields.map(k => [k, k === '時間' ? dateStr : ''])
+  );
+  const form = buildForm(
+    initFields,
+    schemaFields,
     async (div) => {
       const { fields, field_order } = collectFormData(div);
-      await api('POST', '/api/reports', { date: currentDate, fields, field_order });
-      await selectDate(currentDate);
+      try {
+        await api('POST', '/api/reports', { date: currentDate, fields, field_order });
+        showToast('已成功儲存');
+        await selectDate(currentDate);
+      } catch (e) {
+        showToast(`儲存失敗：${e.message}`, 'error');
+      }
     },
-    cancelForm
+    cancelForm,
+    schemaFields
   );
   container.appendChild(form);
 }
