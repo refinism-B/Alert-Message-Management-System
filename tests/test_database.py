@@ -93,16 +93,16 @@ def test_search_does_not_match_keys():
     assert len(results) == 0
 
 def test_search_with_date_range():
-    database.create_report("2026-06-01", {"Offense ID": "OFN-001"}, ["Offense ID"])
-    database.create_report("2026-06-05", {"Offense ID": "OFN-001"}, ["Offense ID"])
-    database.create_report("2026-06-10", {"Offense ID": "OFN-001"}, ["Offense ID"])
+    database.create_report("2026-06-01", {"Offense ID": "OFN-001-A"}, ["Offense ID"])
+    database.create_report("2026-06-05", {"Offense ID": "OFN-001-B"}, ["Offense ID"])
+    database.create_report("2026-06-10", {"Offense ID": "OFN-001-C"}, ["Offense ID"])
     results = database.search_reports("OFN-001", date_from="2026-06-02", date_to="2026-06-09")
     assert len(results) == 1
     assert results[0]["date"] == "2026-06-05"
 
 def test_search_no_date_range_returns_all_dates():
-    database.create_report("2026-06-01", {"Offense ID": "OFN-999"}, ["Offense ID"])
-    database.create_report("2026-06-10", {"Offense ID": "OFN-999"}, ["Offense ID"])
+    database.create_report("2026-06-01", {"Offense ID": "OFN-999-A"}, ["Offense ID"])
+    database.create_report("2026-06-10", {"Offense ID": "OFN-999-B"}, ["Offense ID"])
     results = database.search_reports("OFN-999")
     assert len(results) == 2
 
@@ -119,3 +119,17 @@ def test_search_no_keyword_with_date_range():
     results = database.search_reports(q=None, date_from="2026-06-02", date_to="2026-06-09")
     assert len(results) == 1
     assert results[0]["fields"]["Offense ID"] == "B"
+
+
+def test_create_report_duplicate_offense_id_raises():
+    database.create_report(
+        "2026-06-06",
+        {"Offense ID": "OFN-999"},
+        ["Offense ID"],
+    )
+    with pytest.raises(ValueError, match="Offense ID 已存在"):
+        database.create_report(
+            "2026-06-07",
+            {"Offense ID": "OFN-999"},
+            ["Offense ID"],
+        )

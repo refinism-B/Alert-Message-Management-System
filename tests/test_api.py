@@ -90,8 +90,8 @@ def test_search(client):
     assert len(data["reports"]) == 1
 
 def test_search_with_date_range(client):
-    client.post("/api/reports", json={"date": "2026-06-01", "fields": {"Offense ID": "OFN-999"}, "field_order": ["Offense ID"]})
-    client.post("/api/reports", json={"date": "2026-06-10", "fields": {"Offense ID": "OFN-999"}, "field_order": ["Offense ID"]})
+    client.post("/api/reports", json={"date": "2026-06-01", "fields": {"Offense ID": "OFN-999-A"}, "field_order": ["Offense ID"]})
+    client.post("/api/reports", json={"date": "2026-06-10", "fields": {"Offense ID": "OFN-999-B"}, "field_order": ["Offense ID"]})
     r = client.get("/api/search?q=OFN-999&date_from=2026-06-05&date_to=2026-06-15")
     assert r.status_code == 200
     assert len(r.json()["reports"]) == 1
@@ -102,3 +102,18 @@ def test_search_date_range_no_keyword(client):
     r = client.get("/api/search?date_from=2026-06-01&date_to=2026-06-15")
     assert r.status_code == 200
     assert len(r.json()["reports"]) == 2
+
+
+def test_create_report_duplicate_offense_id_returns_409(client):
+    client.post("/api/reports", json={
+        "date": "2026-06-06",
+        "fields": {"Offense ID": "OFN-DUP"},
+        "field_order": ["Offense ID"],
+    })
+    r = client.post("/api/reports", json={
+        "date": "2026-06-07",
+        "fields": {"Offense ID": "OFN-DUP"},
+        "field_order": ["Offense ID"],
+    })
+    assert r.status_code == 409
+    assert "Offense ID 已存在" in r.json()["detail"]

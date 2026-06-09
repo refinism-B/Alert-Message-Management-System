@@ -21,7 +21,10 @@ def get_reports(date: str) -> list[models.ReportResponse]:
 
 @app.post("/api/reports")
 def create_report(body: models.ReportCreate) -> models.ReportResponse:
-    return database.create_report(body.date, body.fields, body.field_order)
+    try:
+        return database.create_report(body.date, body.fields, body.field_order)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @app.put("/api/reports/{report_id}")
