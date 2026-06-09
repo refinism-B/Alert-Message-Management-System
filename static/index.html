@@ -55,6 +55,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 /* Search results */
 .search-date-tag { font-size: 11px; color: #3b82f6; margin-bottom: 4px; }
 #no-results { text-align: center; color: #475569; padding: 40px; }
+/* Toast */
+#toast-container { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; pointer-events: none; }
+.toast { padding: 10px 16px; border-radius: 4px; font-size: 13px; opacity: 1; transition: opacity 0.3s ease; white-space: nowrap; }
+.toast-success { background: #065f46; color: #6ee7b7; border: 1px solid #10b981; }
+.toast-error { background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; }
 </style>
 </head>
 <body>
@@ -101,6 +106,18 @@ let schemaFields = [];
 let isSearchMode = false;
 
 const today = new Date().toISOString().split('T')[0];
+
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 2000);
+}
 
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -261,9 +278,10 @@ function formatReport(report) {
   return report.field_order.map(k => `- ${k}：${report.fields[k] ?? ''}`).join('\n');
 }
 
-function copyReport(id) {
+async function copyReport(id) {
   const card = document.getElementById(`card-${id}`);
-  navigator.clipboard.writeText(formatReport(card._report));
+  await navigator.clipboard.writeText(formatReport(card._report));
+  showToast('已成功複製');
 }
 
 function copyAll() {
@@ -412,5 +430,6 @@ function editReport(id) {
 
 init();
 </script>
+<div id="toast-container"></div>
 </body>
 </html>
