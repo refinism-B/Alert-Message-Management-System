@@ -34,7 +34,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #sidebar.disabled .sidebar-inner { opacity: 0.4; pointer-events: none; }
 #sidebar-toggle { width: 100%; background: none; border: none; border-bottom: 1px solid #1e293b; color: #475569; cursor: pointer; padding: 8px 0; font-size: 14px; text-align: center; }
 #sidebar-toggle:hover { color: #e2e8f0; background: #1e293b; }
-.sidebar-inner { padding: 12px 8px; white-space: nowrap; }
+.sidebar-inner { padding: 12px 8px; white-space: nowrap; overflow-y: auto; max-height: calc(100vh - 40px); }
 #sidebar .sidebar-label { font-size: 11px; text-transform: uppercase; color: #475569; padding: 0 6px; margin-bottom: 8px; letter-spacing: 0.05em; }
 .date-item { padding: 7px 8px; border-radius: 4px; font-size: 13px; cursor: pointer; color: #94a3b8; margin-bottom: 2px; }
 .date-item:hover { background: #1e293b; color: #e2e8f0; }
