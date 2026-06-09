@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<title>SOC Reporter</title>
+<title>SOC Toolkit</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
@@ -61,8 +61,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 
 <!-- Top bar -->
 <div id="topbar">
-  <span class="brand">SOC Reporter</span>
-  <input id="search-input" type="text" placeholder="🔍 搜尋 IP / Offense ID...">
+  <span class="brand">SOC Toolkit</span>
+  <input id="search-input" type="text" placeholder="搜尋 IP / Offense ID...">
   <span class="sep">日期區間</span>
   <input id="date-from" class="date-input" type="date">
   <span class="sep">～</span>
@@ -84,8 +84,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
       <span id="main-title">載入中...</span>
       <div id="main-actions">
         <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
-        <button id="copy-all-btn" class="btn btn-success btn-sm" onclick="copyAll()">📋 複製當日全部</button>
-        <button class="btn btn-secondary btn-sm" onclick="toggleSchemaPanel()">⚙️ 欄位管理</button>
+        <button id="copy-all-btn" class="btn btn-success btn-sm" onclick="copyAll()">複製當日全部</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleSchemaPanel()">欄位管理</button>
       </div>
     </div>
     <div id="add-form-container" style="display:none"></div>
@@ -183,14 +183,14 @@ function renderSchemaPanel() {
       <button class="btn btn-danger btn-sm" onclick="schemaFields.splice(${i},1);renderSchemaPanel()">✕</button>
     </div>`).join('');
   panel.innerHTML = `
-    <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#94a3b8">⚙️ 預設欄位管理</div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:#94a3b8">預設欄位管理</div>
     <div id="schema-rows">${rows}</div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <input id="new-field-input" class="field-input" placeholder="新欄位名稱" style="flex:1">
       <button class="btn btn-success btn-sm" onclick="addSchemaField()">＋ 新增</button>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" onclick="saveSchema()">💾 儲存</button>
+      <button class="btn btn-primary btn-sm" onclick="saveSchema()">儲存</button>
       <button class="btn btn-secondary btn-sm" onclick="document.getElementById('schema-panel').style.display='none'">取消</button>
     </div>`;
 }
@@ -241,16 +241,16 @@ function buildCard(report, showDate = false) {
   card.id = `card-${report.id}`;
 
   let html = '';
-  if (showDate) html += `<div class="search-date-tag">📅 ${report.date}</div>`;
+  if (showDate) html += `<div class="search-date-tag">${report.date}</div>`;
   html += '<div class="report-fields">';
   report.field_order.forEach(k => {
     html += `<span class="field-label">${k}</span><span class="field-value">${report.fields[k] ?? ''}</span>`;
   });
   html += '</div>';
   html += `<div class="card-actions">
-    <button class="btn btn-secondary btn-sm" onclick="copyReport(${report.id})">📋 複製</button>
-    <button class="btn btn-secondary btn-sm" onclick="editReport(${report.id})">✏️ 編輯</button>
-    <button class="btn btn-danger btn-sm" onclick="deleteReport(${report.id})">🗑 刪除</button>
+    <button class="btn btn-secondary btn-sm" onclick="copyReport(${report.id})">複製</button>
+    <button class="btn btn-secondary btn-sm" onclick="editReport(${report.id})">編輯</button>
+    <button class="btn btn-danger btn-sm" onclick="deleteReport(${report.id})">刪除</button>
   </div>`;
   card.innerHTML = html;
   card._report = report;
@@ -362,7 +362,7 @@ function buildForm(fields, order, onSave, onCancel) {
     <div class="form-label">輸出預覽</div>
     <div class="preview-area"></div>
     <div class="card-actions">
-      <button class="btn btn-primary btn-sm save-btn">💾 儲存</button>
+      <button class="btn btn-primary btn-sm save-btn">儲存</button>
       <button class="btn btn-secondary btn-sm cancel-btn">取消</button>
     </div>`;
   div.querySelector('.save-btn').onclick = () => onSave(div);
