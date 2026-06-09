@@ -50,7 +50,7 @@ def update_schema(body: models.SchemaUpdate) -> models.SchemaResponse:
 
 @app.get("/api/search")
 def search(
-    q: str,
+    q: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> models.SearchResult:

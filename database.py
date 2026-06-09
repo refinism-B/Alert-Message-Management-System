@@ -118,7 +118,7 @@ def delete_report(report_id: int) -> None:
         conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
 
 
-def search_reports(q: str, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
+def search_reports(q: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
     sql = "SELECT * FROM reports WHERE 1=1"
     params: list = []
     if date_from:
@@ -131,6 +131,9 @@ def search_reports(q: str, date_from: str | None = None, date_to: str | None = N
 
     with get_conn() as conn:
         rows = conn.execute(sql, params).fetchall()
+
+    if q is None:
+        return [_row_to_report(r) for r in rows]
 
     q_lower = q.lower()
     results = []

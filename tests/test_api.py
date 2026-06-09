@@ -95,3 +95,10 @@ def test_search_with_date_range(client):
     r = client.get("/api/search?q=OFN-999&date_from=2026-06-05&date_to=2026-06-15")
     assert r.status_code == 200
     assert len(r.json()["reports"]) == 1
+
+def test_search_date_range_no_keyword(client):
+    client.post("/api/reports", json={"date": "2026-06-01", "fields": {"Offense ID": "A"}, "field_order": ["Offense ID"]})
+    client.post("/api/reports", json={"date": "2026-06-10", "fields": {"Offense ID": "B"}, "field_order": ["Offense ID"]})
+    r = client.get("/api/search?date_from=2026-06-01&date_to=2026-06-15")
+    assert r.status_code == 200
+    assert len(r.json()["reports"]) == 2

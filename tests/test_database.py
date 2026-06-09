@@ -105,3 +105,17 @@ def test_search_no_date_range_returns_all_dates():
     database.create_report("2026-06-10", {"Offense ID": "OFN-999"}, ["Offense ID"])
     results = database.search_reports("OFN-999")
     assert len(results) == 2
+
+def test_search_no_keyword_returns_all():
+    database.create_report("2026-06-01", {"Offense ID": "A"}, ["Offense ID"])
+    database.create_report("2026-06-10", {"Offense ID": "B"}, ["Offense ID"])
+    results = database.search_reports(q=None)
+    assert len(results) == 2
+
+def test_search_no_keyword_with_date_range():
+    database.create_report("2026-06-01", {"Offense ID": "A"}, ["Offense ID"])
+    database.create_report("2026-06-05", {"Offense ID": "B"}, ["Offense ID"])
+    database.create_report("2026-06-10", {"Offense ID": "C"}, ["Offense ID"])
+    results = database.search_reports(q=None, date_from="2026-06-02", date_to="2026-06-09")
+    assert len(results) == 1
+    assert results[0]["fields"]["Offense ID"] == "B"
