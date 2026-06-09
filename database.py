@@ -77,15 +77,14 @@ def _row_to_report(row: sqlite3.Row) -> dict:
 
 def create_report(date: str, fields: dict, field_order: list[str]) -> dict:
     offense_id = fields.get("Offense ID", "").strip()
-    if offense_id:
-        with get_conn() as conn:
-            rows = conn.execute("SELECT fields FROM reports").fetchall()
-        for row in rows:
-            existing = json.loads(row["fields"])
-            if existing.get("Offense ID", "").strip() == offense_id:
-                raise ValueError("Offense ID 已存在")
     now = _now()
     with get_conn() as conn:
+        if offense_id:
+            rows = conn.execute("SELECT fields FROM reports").fetchall()
+            for row in rows:
+                existing = json.loads(row["fields"])
+                if existing.get("Offense ID", "").strip() == offense_id:
+                    raise ValueError("Offense ID 已存在")
         cur = conn.execute(
             "INSERT INTO reports (date, fields, field_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (date, json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, now),
