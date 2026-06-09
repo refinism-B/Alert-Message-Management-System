@@ -64,6 +64,9 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .toast { padding: 10px 16px; border-radius: 4px; font-size: 13px; opacity: 1; transition: opacity 0.3s ease; white-space: nowrap; }
 .toast-success { background: #065f46; color: #6ee7b7; border: 1px solid #10b981; }
 .toast-error { background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; }
+.report-checkbox { width: 14px; height: 14px; cursor: pointer; accent-color: #3b82f6; }
+.checkbox-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.checkbox-row label { font-size: 12px; color: #64748b; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -96,7 +99,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
       <span id="main-title">載入中...</span>
       <div id="main-actions">
         <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
-        <button id="copy-all-btn" class="btn btn-success btn-sm" onclick="copyAll()">複製當日全部</button>
+        <button id="select-all-btn" class="btn btn-secondary btn-sm" onclick="toggleSelectAll()">全選</button>
+        <button id="copy-selected-btn" class="btn btn-success btn-sm" onclick="copySelected()" disabled>複製選取事件</button>
         <button class="btn btn-secondary btn-sm" onclick="toggleSchemaPanel()">欄位管理</button>
       </div>
     </div>
@@ -168,7 +172,8 @@ async function selectDate(date) {
   isSearchMode = false;
   document.getElementById('sidebar').classList.remove('disabled');
   document.getElementById('clear-search-btn').style.display = 'none';
-  document.getElementById('copy-all-btn').style.display = '';
+  document.getElementById('select-all-btn').style.display = '';
+  document.getElementById('copy-selected-btn').style.display = '';
   await loadDates();
   const reports = await api('GET', `/api/reports?date=${date}`);
   currentReports = reports;
@@ -188,7 +193,8 @@ async function doSearch() {
   isSearchMode = true;
   document.getElementById('sidebar').classList.add('disabled');
   document.getElementById('clear-search-btn').style.display = '';
-  document.getElementById('copy-all-btn').style.display = 'none';
+  document.getElementById('select-all-btn').style.display = 'none';
+  document.getElementById('copy-selected-btn').style.display = 'none';
   document.getElementById('main-title').textContent = `搜尋「${q}」— ${data.reports.length} 筆結果`;
   renderReports(data.reports, true);
 }
@@ -261,6 +267,8 @@ function renderReports(reports, searchMode = false) {
   const container = document.getElementById('reports-container');
   container.innerHTML = '';
   document.getElementById('add-form-container').style.display = 'none';
+  const copyBtn = document.getElementById('copy-selected-btn');
+  if (copyBtn) copyBtn.disabled = true;
   if (reports.length === 0) {
     container.innerHTML = '<div id="no-results">無通報紀錄</div>';
     return;
@@ -274,6 +282,12 @@ function buildCard(report, showDate = false) {
   card.id = `card-${report.id}`;
 
   let html = '';
+  if (!showDate) {
+    html += `<div class="checkbox-row">
+      <input type="checkbox" class="report-checkbox" id="chk-${report.id}" data-id="${report.id}" onchange="updateCopyBtn()">
+      <label for="chk-${report.id}">選取</label>
+    </div>`;
+  }
   if (showDate) html += `<div class="search-date-tag">${report.date}</div>`;
   html += '<div class="report-fields">';
   report.field_order.forEach(k => {
@@ -300,10 +314,26 @@ async function copyReport(id) {
   showToast('已成功複製');
 }
 
-function copyAll() {
-  if (!currentReports.length) return;
-  const text = currentReports.map(r => formatReport(r)).join('\n\n\n');
-  navigator.clipboard.writeText(text);
+function updateCopyBtn() {
+  const any = document.querySelectorAll('.report-checkbox:checked').length > 0;
+  document.getElementById('copy-selected-btn').disabled = !any;
+}
+
+function toggleSelectAll() {
+  const checkboxes = Array.from(document.querySelectorAll('.report-checkbox'));
+  const allChecked = checkboxes.length > 0 && checkboxes.every(cb => cb.checked);
+  checkboxes.forEach(cb => { cb.checked = !allChecked; });
+  updateCopyBtn();
+}
+
+async function copySelected() {
+  const checked = Array.from(document.querySelectorAll('.report-checkbox:checked'));
+  if (!checked.length) return;
+  const ids = new Set(checked.map(cb => parseInt(cb.dataset.id)));
+  const reports = currentReports.filter(r => ids.has(r.id));
+  const text = reports.map(r => formatReport(r)).join('\n\n\n');
+  await navigator.clipboard.writeText(text);
+  showToast('已成功複製');
 }
 
 async function deleteReport(id) {
