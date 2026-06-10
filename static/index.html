@@ -355,7 +355,8 @@ function buildFieldRows(fields, order, defaultKeys = []) {
     const isDefault = defaultKeys.includes(k);
     if (isDefault) {
       return `
-        <div class="field-row default-row" data-key="${k}">
+        <div class="field-row" data-key="${k}">
+          <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
           <span class="drag-handle" draggable="true">⠿</span>
           <span class="key-label">${k}</span>
           <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
@@ -363,11 +364,10 @@ function buildFieldRows(fields, order, defaultKeys = []) {
     }
     return `
       <div class="field-row" data-key="${k}">
+        <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
         <span class="drag-handle" draggable="true">⠿</span>
         <input class="field-input key-input" value="${k}" placeholder="欄位名稱">
         <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
-        <button class="btn btn-secondary btn-sm" onclick="moveRowUp(this)">↑</button>
-        <button class="btn btn-danger btn-sm" onclick="const fc=this.closest('.form-container'); this.closest('.field-row').remove(); updatePreview(fc)">✕</button>
       </div>`;
   }).join('');
 }
@@ -376,23 +376,14 @@ function addFieldRow(container) {
   const row = document.createElement('div');
   row.className = 'field-row';
   row.innerHTML = `
+    <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
     <span class="drag-handle" draggable="true">⠿</span>
     <input class="field-input key-input" placeholder="欄位名稱">
-    <input class="field-input val-input" placeholder="值">
-    <button class="btn btn-secondary btn-sm" onclick="moveRowUp(this)">↑</button>
-    <button class="btn btn-danger btn-sm" onclick="const fc=this.closest('.form-container'); this.closest('.field-row').remove(); updatePreview(fc)">✕</button>`;
+    <input class="field-input val-input" placeholder="值">`;
   container.querySelector('.field-rows').appendChild(row);
   bindDrag(container);
 }
 
-function moveRowUp(btn) {
-  const row = btn.closest('.field-row');
-  const prev = row.previousElementSibling;
-  if (prev && prev.classList.contains('field-row')) {
-    row.parentNode.insertBefore(row, prev);
-    updatePreview(row.closest('.form-container'));
-  }
-}
 
 function collectFormData(container) {
   const rows = container.querySelectorAll('.field-row');
@@ -411,6 +402,12 @@ function updatePreview(container) {
   const { fields, field_order } = collectFormData(container);
   const preview = container.querySelector('.preview-area');
   preview.textContent = field_order.map(k => `- ${k}：${fields[k] ?? ''}`).join('\n');
+}
+
+function deleteFieldRow(btn) {
+  const fc = btn.closest('.form-container');
+  btn.closest('.field-row').remove();
+  updatePreview(fc);
 }
 
 function bindDrag(container) {
@@ -437,8 +434,7 @@ function buildForm(fields, order, onSave, onCancel, defaultKeys = []) {
   div.className = 'form-container report-card';
   div.innerHTML = `
     <style>
-      .field-row { display: grid; grid-template-columns: 20px 1fr 1fr 32px 32px; gap: 6px; align-items: center; margin-bottom: 6px; }
-      .field-row.default-row { grid-template-columns: 20px 1fr 1fr; }
+      .field-row { display: grid; grid-template-columns: 32px 20px 1fr 1fr; gap: 6px; align-items: center; margin-bottom: 6px; }
       .key-label { font-size: 13px; color: #cbd5e1; padding: 4px 8px; }
       .drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
       .preview-area { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 10px; font-size: 12px; color: #94a3b8; white-space: pre; margin-bottom: 12px; min-height: 40px; }
