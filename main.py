@@ -68,4 +68,18 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
+    import threading
+    import time
+    import webbrowser
+
+    # 定義一個要在背景執行的函式
+    def open_browser():
+        # 稍微等待 1.5 秒，確保 Uvicorn 伺服器已經完全啟動並開始監聽
+        time.sleep(1.5)
+        webbrowser.open_new_tab("http://127.0.0.1:8000")
+
+    # 啟動背景執行緒去開瀏覽器，主程式會繼續往下走
+    threading.Thread(target=open_browser, daemon=True).start()
+
+    # 執行 Uvicorn（此處會阻塞主執行緒）
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
