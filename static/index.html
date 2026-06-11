@@ -84,7 +84,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .report-fields { display: grid; grid-template-columns: 140px 1fr; gap: 4px 8px; font-size: 17px; margin-bottom: 10px; }
 .field-label { color: #64748b; }
 .field-value { color: #e2e8f0; }
-.field-input { width: 100%; padding: 4px 8px; background: #0f172a; border: 1px solid #334155; border-radius: 3px; color: #e2e8f0; font-size: 17px; }
+.field-input { width: 100%; padding: 6px 8px; background: #0f172a; border: 1px solid #334155; border-radius: 3px; color: #e2e8f0; font-size: 17px; }
+.field-row .btn-danger { padding: 4px 6px; }
 .card-actions { display: flex; gap: 6px; }
 .edit-label { font-size: 15px; color: #3b82f6; margin-bottom: 8px; }
 
@@ -600,7 +601,7 @@ function buildForm(fields, order, onSave, onCancel, defaultKeys = []) {
   div.className = 'form-container report-card';
   div.innerHTML = `
     <style>
-      .field-row { display: grid; grid-template-columns: 32px 20px 1fr 3fr; gap: 6px; align-items: center; margin-bottom: 6px; }
+      .field-row { display: grid; grid-template-columns: 32px 20px 1fr 3fr; gap: 6px; align-items: center; margin-bottom: 4px; }
       .key-label { font-size: 17px; color: #cbd5e1; padding: 4px 8px; }
       .drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
       .form-container .form-label { font-size: 15px; color: #475569; margin-bottom: 4px; text-transform: uppercase; }
