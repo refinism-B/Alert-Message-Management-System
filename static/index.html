@@ -149,6 +149,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
       <span id="main-title">載入中...</span>
       <div id="main-actions">
         <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
+        <button id="sort-btn" class="btn btn-secondary btn-sm" onclick="toggleSort()">排序↓</button>
         <button id="select-all-btn" class="btn btn-secondary btn-sm" onclick="toggleSelectAll()">全選</button>
         <button id="copy-selected-btn" class="btn btn-success btn-sm" onclick="copySelected()" disabled>複製選取事件</button>
         <button class="btn btn-secondary btn-sm" onclick="openSchemaDrawer()">欄位管理</button>
@@ -164,6 +165,7 @@ let currentDate = null;
 let currentReports = [];
 let schemaFields = [];
 let isSearchMode = false;
+let sortOrder = 'desc';
 
 const today = new Date().toISOString().split('T')[0];
 
@@ -333,6 +335,25 @@ async function init() {
   });
 }
 
+function sortedReports(reports) {
+  return [...reports].sort((a, b) => sortOrder === 'desc' ? b.id - a.id : a.id - b.id);
+}
+
+function toggleSort() {
+  sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+  document.getElementById('sort-btn').textContent = sortOrder === 'desc' ? '排序↓' : '排序↑';
+  if (isSearchMode) {
+    const container = document.getElementById('reports-container');
+    const sorted = sortedReports(Array.from(container.querySelectorAll('.report-card')).map(c => c._report));
+    sorted.forEach(r => {
+      const card = document.getElementById(`card-${r.id}`);
+      container.appendChild(card);
+    });
+  } else {
+    renderReports(currentReports);
+  }
+}
+
 function renderReports(reports, searchMode = false) {
   const container = document.getElementById('reports-container');
   container.innerHTML = '';
@@ -343,7 +364,7 @@ function renderReports(reports, searchMode = false) {
     container.innerHTML = '<div id="no-results">無通報紀錄</div>';
     return;
   }
-  reports.forEach(r => container.appendChild(buildCard(r, searchMode)));
+  sortedReports(reports).forEach(r => container.appendChild(buildCard(r, searchMode)));
 }
 
 function buildCard(report, showDate = false) {
