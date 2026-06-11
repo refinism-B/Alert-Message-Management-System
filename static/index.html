@@ -50,8 +50,35 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #main-actions { display: flex; gap: 8px; }
 
 /* Report card */
-.report-card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 14px; margin-bottom: 10px; }
+.report-card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; margin-bottom: 10px; display: flex; overflow: hidden; }
 .report-card.editing { border-color: #3b82f6; }
+.card-body { padding: 14px; flex: 1; min-width: 0; }
+@keyframes elastic-select {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(0.92); }
+  70%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.select-zone {
+  width: 44px;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid #334155;
+  cursor: pointer;
+  background: #1e293b;
+  color: #475569;
+  font-size: 14px;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.1em;
+}
+.select-zone:hover { background: #273549; color: #94a3b8; }
+.select-zone.selected { background: #1e3a8a; color: #93c5fd; border-left-color: #3b82f6; }
+.select-zone.animating { animation: elastic-select 0.28s ease; }
 .report-fields { display: grid; grid-template-columns: 140px 1fr; gap: 4px 8px; font-size: 15px; margin-bottom: 10px; }
 .field-label { color: #64748b; }
 .field-value { color: #e2e8f0; }
@@ -67,9 +94,6 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .toast { padding: 10px 16px; border-radius: 4px; font-size: 15px; opacity: 1; transition: opacity 0.3s ease; white-space: nowrap; }
 .toast-success { background: #065f46; color: #6ee7b7; border: 1px solid #10b981; }
 .toast-error { background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; }
-.report-checkbox { width: 14px; height: 14px; cursor: pointer; accent-color: #3b82f6; }
-.checkbox-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-.checkbox-row label { font-size: 12px; color: #64748b; cursor: pointer; }
 /* Drawer overlay */
 #drawer-overlay {
   display: none;
@@ -377,25 +401,30 @@ function buildCard(report, showDate = false) {
   card.className = 'report-card';
   card.id = `card-${report.id}`;
 
-  let html = '';
-  if (!showDate) {
-    html += `<div class="checkbox-row">
-      <input type="checkbox" class="report-checkbox" id="chk-${report.id}" data-id="${report.id}" onchange="updateCopyBtn()">
-      <label for="chk-${report.id}">選取</label>
-    </div>`;
-  }
-  if (showDate) html += `<div class="search-date-tag">${report.date}</div>`;
-  html += '<div class="report-fields">';
+  let bodyHtml = '';
+  if (showDate) bodyHtml += `<div class="search-date-tag">${report.date}</div>`;
+  bodyHtml += '<div class="report-fields">';
   report.field_order.forEach(k => {
-    html += `<span class="field-label">${k}</span><span class="field-value">${report.fields[k] ?? ''}</span>`;
+    bodyHtml += `<span class="field-label">${k}</span><span class="field-value">${report.fields[k] ?? ''}</span>`;
   });
-  html += '</div>';
-  html += `<div class="card-actions">
+  bodyHtml += '</div>';
+  bodyHtml += `<div class="card-actions">
     <button class="btn btn-secondary btn-sm" onclick="copyReport(${report.id})">複製</button>
     <button class="btn btn-secondary btn-sm" onclick="editReport(${report.id})">編輯</button>
     <button class="btn btn-danger btn-sm" onclick="deleteReport(${report.id})">刪除</button>
   </div>`;
-  card.innerHTML = html;
+
+  card.innerHTML = `<div class="card-body">${bodyHtml}</div>`;
+
+  if (!showDate) {
+    const zone = document.createElement('div');
+    zone.className = 'select-zone';
+    zone.textContent = '選取';
+    zone.dataset.id = report.id;
+    zone.onclick = () => toggleSelectZone(zone);
+    card.appendChild(zone);
+  }
+
   card._report = report;
   return card;
 }
@@ -410,22 +439,29 @@ async function copyReport(id) {
   showToast('已成功複製');
 }
 
+function toggleSelectZone(zone) {
+  zone.classList.toggle('selected');
+  zone.classList.add('animating');
+  zone.addEventListener('animationend', () => zone.classList.remove('animating'), { once: true });
+  updateCopyBtn();
+}
+
 function updateCopyBtn() {
-  const any = document.querySelectorAll('.report-checkbox:checked').length > 0;
+  const any = document.querySelectorAll('.select-zone.selected').length > 0;
   document.getElementById('copy-selected-btn').disabled = !any;
 }
 
 function toggleSelectAll() {
-  const checkboxes = Array.from(document.querySelectorAll('.report-checkbox'));
-  const allChecked = checkboxes.length > 0 && checkboxes.every(cb => cb.checked);
-  checkboxes.forEach(cb => { cb.checked = !allChecked; });
+  const zones = Array.from(document.querySelectorAll('.select-zone'));
+  const allSelected = zones.length > 0 && zones.every(z => z.classList.contains('selected'));
+  zones.forEach(z => z.classList.toggle('selected', !allSelected));
   updateCopyBtn();
 }
 
 async function copySelected() {
-  const checked = Array.from(document.querySelectorAll('.report-checkbox:checked'));
-  if (!checked.length) return;
-  const ids = new Set(checked.map(cb => parseInt(cb.dataset.id)));
+  const selected = Array.from(document.querySelectorAll('.select-zone.selected'));
+  if (!selected.length) return;
+  const ids = new Set(selected.map(z => parseInt(z.dataset.id)));
   const reports = currentReports.filter(r => ids.has(r.id));
   const text = reports.map(r => formatReport(r)).join('\n\n\n');
   await navigator.clipboard.writeText(text);
