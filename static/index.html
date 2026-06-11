@@ -32,10 +32,13 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #sidebar { width: 150px; background: #0f172a; border-right: 1px solid #1e293b; overflow: hidden; flex-shrink: 0; transition: width 0.2s ease; }
 #sidebar.collapsed { width: 32px; }
 #sidebar.disabled .sidebar-inner { opacity: 0.4; pointer-events: none; }
-#sidebar-toggle { width: 100%; background: none; border: none; border-bottom: 1px solid #1e293b; color: #475569; cursor: pointer; padding: 8px 0; font-size: 14px; text-align: center; }
+#sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #1e293b; flex-shrink: 0; }
+#sidebar-header .sidebar-label { font-size: 13px; text-transform: uppercase; color: #475569; letter-spacing: 0.05em; transition: opacity 0.2s ease; white-space: nowrap; overflow: hidden; }
+#sidebar.collapsed #sidebar-header .sidebar-label { opacity: 0; pointer-events: none; }
+#sidebar-toggle { background: none; border: 1px solid #334155; border-radius: 3px; color: #475569; cursor: pointer; width: 24px; height: 24px; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; }
 #sidebar-toggle:hover { color: #e2e8f0; background: #1e293b; }
-.sidebar-inner { padding: 12px 8px; white-space: nowrap; overflow-y: auto; max-height: calc(100vh - 40px); }
-#sidebar .sidebar-label { font-size: 13px; text-transform: uppercase; color: #475569; padding: 0 6px; margin-bottom: 8px; letter-spacing: 0.05em; }
+.sidebar-inner { padding: 12px 8px; white-space: nowrap; overflow-y: auto; max-height: calc(100vh - 48px); transition: visibility 0.2s ease, opacity 0.2s ease; }
+#sidebar.collapsed .sidebar-inner { visibility: hidden; opacity: 0; }
 .date-item { padding: 7px 8px; border-radius: 4px; font-size: 15px; cursor: pointer; color: #94a3b8; margin-bottom: 2px; }
 .date-item:hover { background: #1e293b; color: #e2e8f0; }
 .date-item.active { background: #1e40af; color: #fff; }
@@ -136,9 +139,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 <div id="layout">
   <!-- Sidebar -->
   <div id="sidebar">
-    <button id="sidebar-toggle" onclick="toggleSidebar()">‹</button>
+    <div id="sidebar-header">
+      <span class="sidebar-label">日期</span>
+      <button id="sidebar-toggle" onclick="toggleSidebar()">‹</button>
+    </div>
     <div class="sidebar-inner">
-      <div class="sidebar-label">日期</div>
       <div id="date-list"></div>
     </div>
   </div>
@@ -598,8 +603,9 @@ function editReport(id) {
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   sidebar.classList.toggle('collapsed');
-  document.getElementById('sidebar-toggle').textContent =
-    sidebar.classList.contains('collapsed') ? '›' : '‹';
+  const collapsed = sidebar.classList.contains('collapsed');
+  document.getElementById('sidebar-toggle').textContent = collapsed ? '›' : '‹';
+  document.getElementById('sidebar-toggle').title = collapsed ? '展開側邊欄' : '收合側邊欄';
 }
 
 init();
