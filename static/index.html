@@ -157,6 +157,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 }
 #add-modal-overlay.open { opacity: 1; }
 #add-modal {
+  display: none;
   position: fixed;
   top: 50%;
   left: 50%;
@@ -622,6 +623,7 @@ function closeAddModal() {
   overlay.classList.remove('open');
   modal.addEventListener('transitionend', () => {
     overlay.style.display = 'none';
+    modal.style.display = 'none';
     modal.classList.remove('closing');
     modal.innerHTML = '';
   }, { once: true });
@@ -661,6 +663,7 @@ function openAddForm() {
   );
   modal.appendChild(form);
   overlay.style.display = 'block';
+  modal.style.display = 'block';
   requestAnimationFrame(() => overlay.classList.add('open'));
 }
 
