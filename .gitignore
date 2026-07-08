@@ -26,6 +26,10 @@ data/
 *.swp
 *.swo
 
+# Playwright verification artifacts
+.playwright-mcp/
+verify-*.png
+
 # OS
 .DS_Store
 Thumbs.db

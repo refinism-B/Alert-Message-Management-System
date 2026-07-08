@@ -20,7 +20,19 @@ def test_init_db_creates_tables():
 
 def test_init_db_seeds_default_schema():
     schema = database.get_schema()
-    assert schema["fields"] == ["Offense ID", "時間", "方向", "來源IP", "目的IP", "目的port", "防火牆action", "事件總數"]
+    assert schema["fields"] == ["Offense ID", "觸發規則", "時間", "方向", "來源IP", "目的IP", "目的port", "防火牆action", "事件總數"]
+
+def test_init_db_migrates_legacy_schema_missing_trigger_rule():
+    import json
+    legacy = ["Offense ID", "時間", "方向"]
+    with database.get_conn() as conn:
+        conn.execute(
+            "UPDATE field_schema SET fields = ? WHERE id = 1",
+            (json.dumps(legacy, ensure_ascii=False),),
+        )
+    database.init_db()
+    schema = database.get_schema()
+    assert schema["fields"] == ["Offense ID", "觸發規則", "時間", "方向"]
 
 def test_update_schema():
     database.update_schema(["欄位A", "欄位B"])

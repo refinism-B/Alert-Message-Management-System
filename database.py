@@ -5,7 +5,7 @@ from pathlib import Path
 
 DB_PATH = Path("data/reports.db")
 
-DEFAULT_FIELDS = ["Offense ID", "時間", "方向", "來源IP", "目的IP", "目的port", "防火牆action", "事件總數"]
+DEFAULT_FIELDS = ["Offense ID", "觸發規則", "時間", "方向", "來源IP", "目的IP", "目的port", "防火牆action", "事件總數"]
 
 
 def _now() -> str:
@@ -38,12 +38,22 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             )
         """)
-        exists = conn.execute("SELECT id FROM field_schema WHERE id = 1").fetchone()
+        exists = conn.execute("SELECT id, fields FROM field_schema WHERE id = 1").fetchone()
         if not exists:
             conn.execute(
                 "INSERT INTO field_schema (id, fields, updated_at) VALUES (1, ?, ?)",
                 (json.dumps(DEFAULT_FIELDS, ensure_ascii=False), _now()),
             )
+        else:
+            # One-time migration: schemas seeded before 觸發規則 existed lack it
+            fields = json.loads(exists["fields"])
+            if "觸發規則" not in fields:
+                anchor = fields.index("Offense ID") + 1 if "Offense ID" in fields else 1
+                fields.insert(anchor, "觸發規則")
+                conn.execute(
+                    "UPDATE field_schema SET fields = ?, updated_at = ? WHERE id = 1",
+                    (json.dumps(fields, ensure_ascii=False), _now()),
+                )
 
 
 def get_schema() -> dict:
