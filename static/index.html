@@ -680,7 +680,7 @@ function renderAddForm(template) {
   const toggleBar = document.createElement('div');
   toggleBar.className = 'template-toggle-bar';
   const otherTemplate = template === 'general' ? 'waf' : 'general';
-  toggleBar.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="renderAddForm('${otherTemplate}')">目前：${TEMPLATE_LABELS[template]}（點擊切換為 ${TEMPLATE_LABELS[otherTemplate]}）</button>`;
+  toggleBar.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="renderAddForm('${otherTemplate}')">${TEMPLATE_LABELS[template]}</button>`;
   modal.appendChild(toggleBar);
 
   const now = new Date();
