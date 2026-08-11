@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from typing import Optional
+from typing import Literal, Optional
 import database
 import models
 
@@ -45,13 +45,13 @@ def delete_report(report_id: int) -> dict:
 
 
 @app.get("/api/schema")
-def get_schema() -> models.SchemaResponse:
-    return database.get_schema()
+def get_schema(template: Literal["general", "waf"] = "general") -> models.SchemaResponse:
+    return database.get_schema(template)
 
 
 @app.put("/api/schema")
-def update_schema(body: models.SchemaUpdate) -> models.SchemaResponse:
-    return database.update_schema(body.fields)
+def update_schema(body: models.SchemaUpdate, template: Literal["general", "waf"] = "general") -> models.SchemaResponse:
+    return database.update_schema(body.fields, template)
 
 
 @app.get("/api/search")

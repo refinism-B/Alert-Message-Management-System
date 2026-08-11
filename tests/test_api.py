@@ -25,6 +25,24 @@ def test_put_schema(client):
     assert r.status_code == 200
     assert r.json()["fields"] == ["欄位A", "欄位B"]
 
+def test_get_schema_waf_template(client):
+    r = client.get("/api/schema?template=waf")
+    assert r.status_code == 200
+    fields = r.json()["fields"]
+    assert "Offense ID" in fields
+    assert "response code" in fields
+
+def test_put_schema_waf_template_does_not_affect_general(client):
+    r = client.put("/api/schema?template=waf", json={"fields": ["A", "B"]})
+    assert r.status_code == 200
+    assert r.json()["fields"] == ["A", "B"]
+    general = client.get("/api/schema").json()
+    assert general["fields"] != ["A", "B"]
+
+def test_get_schema_invalid_template_rejected(client):
+    r = client.get("/api/schema?template=bogus")
+    assert r.status_code == 422
+
 def test_create_report(client):
     r = client.post("/api/reports", json={
         "date": "2026-06-06",
