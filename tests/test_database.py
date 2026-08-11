@@ -40,6 +40,24 @@ def test_update_schema():
     assert schema["fields"] == ["欄位A", "欄位B"]
     assert schema["updated_at"]
 
+def test_get_schema_waf_template_seeded_with_defaults():
+    schema = database.get_schema("waf")
+    assert schema["fields"] == database.DEFAULT_FIELDS_WAF
+
+def test_get_schema_general_template_unaffected():
+    schema = database.get_schema("general")
+    assert schema["fields"] == database.DEFAULT_FIELDS
+
+def test_update_schema_waf_template_isolated_from_general():
+    database.update_schema(["自訂A", "自訂B"], template="waf")
+    assert database.get_schema("waf")["fields"] == ["自訂A", "自訂B"]
+    assert database.get_schema("general")["fields"] == database.DEFAULT_FIELDS
+
+def test_init_db_does_not_overwrite_existing_waf_schema():
+    database.update_schema(["使用者自訂"], template="waf")
+    database.init_db()
+    assert database.get_schema("waf")["fields"] == ["使用者自訂"]
+
 def test_create_and_get_report():
     report = database.create_report(
         date="2026-06-06",

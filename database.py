@@ -7,6 +7,13 @@ DB_PATH = Path("data/reports.db")
 
 DEFAULT_FIELDS = ["Offense ID", "觸發規則", "時間", "方向", "來源IP", "目的IP", "目的port", "防火牆action", "事件總數"]
 
+DEFAULT_FIELDS_WAF = [
+    "Offense ID", "觸發規則", "時間", "方向", "來源IP", "目的IP", "目的port",
+    "防火牆action", "response code", "severity", "攻擊類型", "日誌總數", "事件描述",
+]
+
+TEMPLATE_IDS = {"general": 1, "waf": 2}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -55,21 +62,30 @@ def init_db() -> None:
                     (json.dumps(fields, ensure_ascii=False), _now()),
                 )
 
+        waf_exists = conn.execute("SELECT id FROM field_schema WHERE id = 2").fetchone()
+        if not waf_exists:
+            conn.execute(
+                "INSERT INTO field_schema (id, fields, updated_at) VALUES (2, ?, ?)",
+                (json.dumps(DEFAULT_FIELDS_WAF, ensure_ascii=False), _now()),
+            )
 
-def get_schema() -> dict:
+
+def get_schema(template: str = "general") -> dict:
+    schema_id = TEMPLATE_IDS[template]
     with get_conn() as conn:
-        row = conn.execute("SELECT fields, updated_at FROM field_schema WHERE id = 1").fetchone()
+        row = conn.execute("SELECT fields, updated_at FROM field_schema WHERE id = ?", (schema_id,)).fetchone()
     if row is None:
         raise RuntimeError("Schema row missing — was init_db() called?")
     return {"fields": json.loads(row["fields"]), "updated_at": row["updated_at"]}
 
 
-def update_schema(fields: list[str]) -> dict:
+def update_schema(fields: list[str], template: str = "general") -> dict:
+    schema_id = TEMPLATE_IDS[template]
     now = _now()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE field_schema SET fields = ?, updated_at = ? WHERE id = 1",
-            (json.dumps(fields, ensure_ascii=False), now),
+            "UPDATE field_schema SET fields = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(fields, ensure_ascii=False), now, schema_id),
         )
     return {"fields": fields, "updated_at": now}
 
