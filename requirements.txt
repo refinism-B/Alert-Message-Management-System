@@ -5,3 +5,4 @@ httpx>=0.27.0
 python-dotenv>=1.0.0
 whoisit>=2.5.0
 python-whois>=0.9.4
+anthropic>=0.40.0
