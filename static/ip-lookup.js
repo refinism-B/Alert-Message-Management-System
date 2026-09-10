@@ -214,6 +214,10 @@
     return tab === 'rdap' ? lastRdapResult : lastVtResult;
   }
 
+  function sanitizeFilename(s) {
+    return String(s).replace(/[\\/:*?"<>|]/g, '_');
+  }
+
   window.ipLookupExportTxt = function (tab) {
     const result = resultForTab(tab);
     if (!result) return;
@@ -222,7 +226,7 @@
     for (const [k, v] of Object.entries(flat)) {
       lines.push(`${k}：${v}`);
     }
-    downloadBlob(`${tab}_${result.target}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
+    downloadBlob(`${tab}_${sanitizeFilename(result.target)}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
   };
 
   window.ipLookupExportCsv = function (tab) {
@@ -234,7 +238,7 @@
       rows.push([k, v]);
     }
     const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\r\n');
-    downloadBlob(`${tab}_${result.target}.csv`, '﻿' + csv, 'text/csv;charset=utf-8');
+    downloadBlob(`${tab}_${sanitizeFilename(result.target)}.csv`, '﻿' + csv, 'text/csv;charset=utf-8');
   };
 
   window.ipLookupExportAnalysisTxt = function () {
@@ -246,6 +250,6 @@
       '',
       lastAnalysisResult.content,
     ];
-    downloadBlob(`analysis_${lastAnalysisResult.target}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
+    downloadBlob(`analysis_${sanitizeFilename(lastAnalysisResult.target)}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
   };
 })();
