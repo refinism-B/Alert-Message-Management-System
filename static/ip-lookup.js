@@ -133,4 +133,52 @@
     fetchRdap(target);
     fetchVt(target);
   };
+
+  let lastAnalysisResult = null;
+
+  function renderAnalysis(result) {
+    lastAnalysisResult = result;
+    const panel = document.getElementById('iplookup-panel-analysis');
+    panel.innerHTML = `
+      <div class="iplookup-meta">
+        <div><span class="field-label">分析日期時間</span>${escapeHtml(result.analyzed_at)}</div>
+        <div><span class="field-label">分析對象</span>${escapeHtml(result.target)}</div>
+        <div><span class="field-label">分析使用的廠牌與模型</span>Anthropic — ${escapeHtml(result.model)}</div>
+      </div>
+      <div class="iplookup-disclaimer">本分析僅供參考，非最終判斷，請自行核實原始資料</div>
+      <pre class="iplookup-analysis-content">${escapeHtml(result.content)}</pre>`;
+  }
+
+  window.ipLookupAnalyze = async function () {
+    const target = document.getElementById('iplookup-input').value.trim();
+    const btn = document.getElementById('iplookup-analyze-btn');
+    btn.disabled = true;
+    document.getElementById('iplookup-panel-analysis').innerHTML = '<div class="iplookup-loading">分析中...</div>';
+    try {
+      const res = await fetch('/api/lookup/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target,
+          rdap: lastRdapResult ? lastRdapResult.data : null,
+          vt: lastVtResult ? lastVtResult.data : null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        document.getElementById('iplookup-panel-analysis').innerHTML =
+          `<div class="iplookup-error">進階分析失敗：${res.status} ${escapeHtml(err.detail || '')}</div>`;
+        return;
+      }
+      const result = await res.json();
+      renderAnalysis(result);
+      document.getElementById('iplookup-tab-btn-analysis').disabled = false;
+      ipLookupSwitchTab('analysis');
+    } catch (e) {
+      document.getElementById('iplookup-panel-analysis').innerHTML =
+        `<div class="iplookup-error">進階分析失敗：${escapeHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
 })();
