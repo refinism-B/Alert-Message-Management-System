@@ -96,7 +96,10 @@ def lookup_analyze(body: models.AnalyzeRequest) -> models.AnalyzeResponse:
     if not api_key:
         raise HTTPException(status_code=503, detail="請設定 LLM_API_KEY")
     model = os.environ.get("LLM_MODEL", "claude-sonnet-5")
-    return lookup.analyze_with_llm(body.target, body.rdap, body.vt, api_key, model)
+    try:
+        return lookup.analyze_with_llm(body.target, body.rdap, body.vt, api_key, model)
+    except lookup.LlmQueryError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

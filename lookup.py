@@ -101,6 +101,12 @@ def query_virustotal(target: str, api_key: str) -> dict:
     }
 
 
+class LlmQueryError(Exception):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        super().__init__(message)
+
+
 SYSTEM_PROMPT = """你的任務是根據使用者提供的 RDAP／VirusTotal 查詢資料，列出可能提高風險的因素。
 
 規則：
@@ -138,12 +144,17 @@ def _missing_data_note(rdap: Optional[dict], vt: Optional[dict]) -> str:
 
 def analyze_with_llm(target: str, rdap: Optional[dict], vt: Optional[dict], api_key: str, model: str) -> dict:
     client = anthropic.Anthropic(api_key=api_key)
-    message = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"【使用者提供資料】\n{_build_user_content(target, rdap, vt)}"}],
-    )
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"【使用者提供資料】\n{_build_user_content(target, rdap, vt)}"}],
+        )
+    except anthropic.APIStatusError as e:
+        raise LlmQueryError(e.status_code, f"LLM 進階分析失敗：{e.status_code} {e.message}") from e
+    except anthropic.APIConnectionError as e:
+        raise LlmQueryError(503, "LLM 進階分析失敗：無法連線至 Anthropic API") from e
     content = message.content[0].text
     note = _missing_data_note(rdap, vt)
     if note:

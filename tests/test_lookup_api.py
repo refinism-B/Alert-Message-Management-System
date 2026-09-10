@@ -86,3 +86,15 @@ def test_lookup_analyze_success(client, monkeypatch):
     body = r.json()
     assert body["target"] == "8.8.8.8"
     assert body["model"] == "claude-sonnet-5"
+
+
+def test_lookup_analyze_llm_error_returns_mapped_status(client, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+
+    def raise_llm_error(target, rdap, vt, api_key, model):
+        raise lookup.LlmQueryError(429, "LLM 進階分析失敗：429 Too Many Requests")
+
+    monkeypatch.setattr(lookup, "analyze_with_llm", raise_llm_error)
+    r = client.post("/api/lookup/analyze", json={"target": "8.8.8.8", "rdap": {}, "vt": {}})
+    assert r.status_code == 429
+    assert "429" in r.json()["detail"]

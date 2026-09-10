@@ -184,3 +184,41 @@ def test_analyze_with_llm_notes_missing_rdap_data(monkeypatch):
     )
     result = lookup.analyze_with_llm("example.com", None, {"data": {}}, "fake-key", "claude-sonnet-5")
     assert result["content"].startswith("（RDAP 資料缺失，本分析僅根據 VT 資料）")
+
+
+class _FailingMessages:
+    def __init__(self, error):
+        self._error = error
+
+    def create(self, **kwargs):
+        raise self._error
+
+
+class _FailingAnthropicClient:
+    def __init__(self, api_key, error):
+        self.messages = _FailingMessages(error)
+
+
+def test_analyze_with_llm_raises_llm_query_error_on_status_error(monkeypatch):
+    request = lookup.httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = lookup.httpx.Response(429, request=request)
+    error = lookup.anthropic.APIStatusError("rate limited", response=response, body=None)
+    monkeypatch.setattr(
+        lookup.anthropic, "Anthropic",
+        lambda api_key: _FailingAnthropicClient(api_key, error),
+    )
+    with pytest.raises(lookup.LlmQueryError) as exc_info:
+        lookup.analyze_with_llm("1.2.3.4", {}, {}, "fake-key", "claude-sonnet-5")
+    assert exc_info.value.status_code == 429
+
+
+def test_analyze_with_llm_raises_llm_query_error_on_connection_error(monkeypatch):
+    request = lookup.httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    error = lookup.anthropic.APIConnectionError(request=request)
+    monkeypatch.setattr(
+        lookup.anthropic, "Anthropic",
+        lambda api_key: _FailingAnthropicClient(api_key, error),
+    )
+    with pytest.raises(lookup.LlmQueryError) as exc_info:
+        lookup.analyze_with_llm("1.2.3.4", {}, {}, "fake-key", "claude-sonnet-5")
+    assert exc_info.value.status_code == 503
