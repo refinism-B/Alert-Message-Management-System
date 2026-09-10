@@ -5,7 +5,10 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from typing import Literal, Optional
+import os
+
 import database
+import lookup
 import models
 
 app = FastAPI()
@@ -66,6 +69,34 @@ def search(
 ) -> models.SearchResult:
     reports = database.search_reports(q, date_from, date_to)
     return {"reports": reports}
+
+
+@app.get("/api/lookup/rdap")
+def lookup_rdap(target: str) -> models.RdapLookupResponse:
+    try:
+        return lookup.query_rdap_whois(target)
+    except lookup.LookupFailedError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/api/lookup/vt")
+def lookup_vt(target: str) -> models.VtLookupResponse:
+    api_key = os.environ.get("VT_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="請設定 VT_API_KEY")
+    try:
+        return lookup.query_virustotal(target, api_key)
+    except lookup.VtQueryError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+@app.post("/api/lookup/analyze")
+def lookup_analyze(body: models.AnalyzeRequest) -> models.AnalyzeResponse:
+    api_key = os.environ.get("LLM_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="請設定 LLM_API_KEY")
+    model = os.environ.get("LLM_MODEL", "claude-sonnet-5")
+    return lookup.analyze_with_llm(body.target, body.rdap, body.vt, api_key, model)
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

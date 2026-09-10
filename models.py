@@ -1,3 +1,5 @@
+from typing import Literal, Optional
+
 from pydantic import BaseModel
 
 
@@ -32,3 +34,32 @@ class SchemaResponse(BaseModel):
 
 class SearchResult(BaseModel):
     reports: list[ReportResponse]
+
+
+class RdapLookupResponse(BaseModel):
+    target: str
+    type: Literal["ip", "domain"]
+    source: str
+    queried_at: str
+    data: dict
+
+
+class VtLookupResponse(BaseModel):
+    target: str
+    type: Literal["ip", "domain"]
+    source: str
+    queried_at: str
+    data: dict
+
+
+class AnalyzeRequest(BaseModel):
+    target: str
+    rdap: Optional[dict] = None
+    vt: Optional[dict] = None
+
+
+class AnalyzeResponse(BaseModel):
+    content: str
+    analyzed_at: str
+    target: str
+    model: str
