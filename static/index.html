@@ -197,6 +197,19 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #add-modal .card-actions .btn-sm { padding: 10px 32px; font-size: 17px; }
 .template-toggle-bar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .template-toggle-bar .btn-sm { font-size: 14px; padding: 6px 14px; }
+
+/* Tab switcher */
+#tab-switcher { display: flex; gap: 6px; margin-left: auto; }
+.tab-btn { padding: 8px 16px; border: 1px solid #334155; border-radius: 4px; background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 14px; }
+.tab-btn:hover { background: #273549; color: #e2e8f0; }
+.tab-btn.active { background: #1e40af; border-color: #1e40af; color: #fff; }
+
+/* Main-header search row (relocated from topbar) */
+#main-header { flex-wrap: wrap; row-gap: 8px; }
+#main-header-search { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* IP lookup page (filled in Task 9) */
+#iplookup-root { padding: 16px 20px; }
 </style>
 </head>
 <body>
@@ -204,44 +217,56 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 <!-- Top bar -->
 <div id="topbar">
   <span class="brand">SOC Toolkit</span>
-  <input id="search-input" type="text" placeholder="搜尋 IP / Offense ID...">
-  <span class="sep">日期區間</span>
-  <input id="date-from" class="date-input" type="date">
-  <span class="sep">～</span>
-  <input id="date-to" class="date-input" type="date">
-  <button class="btn btn-primary" onclick="doSearch()">搜尋</button>
-  <button id="clear-search-btn" class="btn btn-secondary" style="display:none" onclick="clearSearch()">✕ 清除</button>
+  <div id="tab-switcher">
+    <button id="tab-btn-reports" class="tab-btn active" onclick="switchAppTab('reports')">事件管理</button>
+    <button id="tab-btn-lookup" class="tab-btn" onclick="switchAppTab('lookup')">IP查詢</button>
+  </div>
 </div>
 
-<div id="layout">
-  <!-- Sidebar -->
-  <div id="sidebar">
-    <div id="sidebar-header">
-      <span class="sidebar-label">日期</span>
-      <button id="sidebar-toggle" onclick="toggleSidebar()">‹</button>
-    </div>
-    <div class="sidebar-inner">
-      <div id="date-list"></div>
-    </div>
-  </div>
-
-  <!-- Main content -->
-  <div id="main">
-    <div id="main-header">
-      <span id="main-title">載入中...</span>
-      <div id="main-actions">
-        <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
-        <button id="sort-btn" class="btn btn-secondary btn-sm" onclick="toggleSort()">排序↓</button>
-        <button id="select-all-btn" class="btn btn-secondary btn-sm" onclick="toggleSelectAll()">全選</button>
-        <button id="copy-selected-btn" class="btn btn-success btn-sm" onclick="copySelected()" disabled>複製選取事件</button>
-        <button class="btn btn-secondary btn-sm" onclick="openSchemaDrawer()">欄位管理</button>
+<div id="reports-tab" class="app-tab">
+  <div id="layout">
+    <!-- Sidebar -->
+    <div id="sidebar">
+      <div id="sidebar-header">
+        <span class="sidebar-label">日期</span>
+        <button id="sidebar-toggle" onclick="toggleSidebar()">‹</button>
+      </div>
+      <div class="sidebar-inner">
+        <div id="date-list"></div>
       </div>
     </div>
-    <div id="main-content">
-      <div id="add-form-container" style="display:none"></div>
-      <div id="reports-container"></div>
+
+    <!-- Main content -->
+    <div id="main">
+      <div id="main-header">
+        <span id="main-title">載入中...</span>
+        <div id="main-header-search">
+          <input id="search-input" type="text" placeholder="搜尋 IP / Offense ID...">
+          <span class="sep">日期區間</span>
+          <input id="date-from" class="date-input" type="date">
+          <span class="sep">～</span>
+          <input id="date-to" class="date-input" type="date">
+          <button class="btn btn-primary btn-sm" onclick="doSearch()">搜尋</button>
+          <button id="clear-search-btn" class="btn btn-secondary btn-sm" style="display:none" onclick="clearSearch()">✕ 清除</button>
+        </div>
+        <div id="main-actions">
+          <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
+          <button id="sort-btn" class="btn btn-secondary btn-sm" onclick="toggleSort()">排序↓</button>
+          <button id="select-all-btn" class="btn btn-secondary btn-sm" onclick="toggleSelectAll()">全選</button>
+          <button id="copy-selected-btn" class="btn btn-success btn-sm" onclick="copySelected()" disabled>複製選取事件</button>
+          <button class="btn btn-secondary btn-sm" onclick="openSchemaDrawer()">欄位管理</button>
+        </div>
+      </div>
+      <div id="main-content">
+        <div id="add-form-container" style="display:none"></div>
+        <div id="reports-container"></div>
+      </div>
     </div>
   </div>
+</div>
+
+<div id="lookup-tab" class="app-tab" style="display:none">
+  <div id="iplookup-root"></div>
 </div>
 
 <script>
@@ -250,6 +275,16 @@ let currentReports = [];
 let schemaByTemplate = { general: [], waf: [] };
 let isSearchMode = false;
 let sortOrder = 'desc';
+
+let activeAppTab = 'reports';
+
+function switchAppTab(tab) {
+  activeAppTab = tab;
+  document.getElementById('reports-tab').style.display = tab === 'reports' ? '' : 'none';
+  document.getElementById('lookup-tab').style.display = tab === 'lookup' ? '' : 'none';
+  document.getElementById('tab-btn-reports').classList.toggle('active', tab === 'reports');
+  document.getElementById('tab-btn-lookup').classList.toggle('active', tab === 'lookup');
+}
 
 const today = new Date().toISOString().split('T')[0];
 
@@ -753,6 +788,7 @@ function toggleSidebar() {
 
 init();
 </script>
+<script src="ip-lookup.js"></script>
 <div id="drawer-overlay" onclick="closeSchemaDrawer()"></div>
 <div id="schema-drawer">
   <div id="schema-drawer-header">
