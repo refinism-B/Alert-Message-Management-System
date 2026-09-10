@@ -210,6 +210,18 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 
 /* IP lookup page (filled in Task 9) */
 #iplookup-root { padding: 16px 20px; }
+.iplookup-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+.iplookup-bar input { flex: 1; max-width: 360px; padding: 8px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 15px; }
+.iplookup-tabs { display: flex; gap: 4px; border-bottom: 1px solid #334155; margin-bottom: 14px; }
+.iplookup-tab-btn { padding: 8px 16px; border: none; background: none; color: #64748b; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; }
+.iplookup-tab-btn.active { color: #e2e8f0; border-bottom-color: #3b82f6; }
+.iplookup-tab-btn:disabled { color: #334155; cursor: not-allowed; }
+.iplookup-panel { display: none; }
+.iplookup-panel.active { display: block; }
+.iplookup-meta { background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; }
+.iplookup-meta > div { display: flex; gap: 8px; }
+.iplookup-empty, .iplookup-loading { color: #475569; padding: 30px; text-align: center; }
+.iplookup-error { color: #fca5a5; background: #450a0a; border: 1px solid #7f1d1d; border-radius: 4px; padding: 12px; }
 </style>
 </head>
 <body>
