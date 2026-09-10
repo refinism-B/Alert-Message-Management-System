@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
+import httpx
 import whois
 import whoisit
 from whoisit import errors as whoisit_errors
@@ -64,3 +65,35 @@ def query_rdap_whois(target: str) -> dict:
             raise LookupFailedError("RDAP 與 WHOIS 查詢皆失敗：查無資料")
 
     return {"target": target, "type": target_type, "source": "WHOIS 備援（TCP 43）", "queried_at": queried_at, "data": data}
+
+
+VT_BASE_URL = "https://www.virustotal.com/api/v3"
+
+
+class VtQueryError(Exception):
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        super().__init__(message)
+
+
+def _vt_path(target: str, target_type: str) -> str:
+    kind = "ip_addresses" if target_type == "ip" else "domains"
+    return f"{VT_BASE_URL}/{kind}/{target}"
+
+
+def query_virustotal(target: str, api_key: str) -> dict:
+    target_type = classify_target(target)
+    queried_at = _now_tw()
+    response = httpx.get(_vt_path(target, target_type), headers={"x-apikey": api_key}, timeout=10.0)
+    if response.status_code != 200:
+        raise VtQueryError(
+            response.status_code,
+            f"VirusTotal 查詢失敗：{response.status_code} {response.reason_phrase}",
+        )
+    return {
+        "target": target,
+        "type": target_type,
+        "source": "VirusTotal Public API v3",
+        "queried_at": queried_at,
+        "data": response.json(),
+    }
