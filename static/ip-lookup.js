@@ -63,7 +63,12 @@
     const rows = Object.entries(flattenForDisplay(result.data))
       .map(([k, v]) => `<div class="report-fields"><span class="field-label">${escapeHtml(k)}</span><span class="field-value">${escapeHtml(v)}</span></div>`)
       .join('');
-    panel.innerHTML = meta + rows;
+    const exportBtns = `
+      <div class="iplookup-export">
+        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportTxt('${tab}')">匯出 TXT</button>
+        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportCsv('${tab}')">匯出 CSV</button>
+      </div>`;
+    panel.innerHTML = meta + rows + exportBtns;
   }
 
   function setQueryButtonDisabled(disabled) {
@@ -146,7 +151,10 @@
         <div><span class="field-label">分析使用的廠牌與模型</span>Anthropic — ${escapeHtml(result.model)}</div>
       </div>
       <div class="iplookup-disclaimer">本分析僅供參考，非最終判斷，請自行核實原始資料</div>
-      <pre class="iplookup-analysis-content">${escapeHtml(result.content)}</pre>`;
+      <pre class="iplookup-analysis-content">${escapeHtml(result.content)}</pre>
+      <div class="iplookup-export">
+        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportAnalysisTxt()">匯出 TXT</button>
+      </div>`;
   }
 
   window.ipLookupAnalyze = async function () {
@@ -180,5 +188,64 @@
     } finally {
       btn.disabled = false;
     }
+  };
+
+  function csvEscape(value) {
+    const s = String(value ?? '');
+    if (/[",\n]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function downloadBlob(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function resultForTab(tab) {
+    return tab === 'rdap' ? lastRdapResult : lastVtResult;
+  }
+
+  window.ipLookupExportTxt = function (tab) {
+    const result = resultForTab(tab);
+    if (!result) return;
+    const lines = [`資料來源：${result.source}`, `查詢日期時間：${result.queried_at}`, ''];
+    const flat = flattenForDisplay(result.data);
+    for (const [k, v] of Object.entries(flat)) {
+      lines.push(`${k}：${v}`);
+    }
+    downloadBlob(`${tab}_${result.target}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
+  };
+
+  window.ipLookupExportCsv = function (tab) {
+    const result = resultForTab(tab);
+    if (!result) return;
+    const rows = [['欄位', '值'], ['資料來源', result.source], ['查詢日期時間', result.queried_at]];
+    const flat = flattenForDisplay(result.data);
+    for (const [k, v] of Object.entries(flat)) {
+      rows.push([k, v]);
+    }
+    const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\r\n');
+    downloadBlob(`${tab}_${result.target}.csv`, '﻿' + csv, 'text/csv;charset=utf-8');
+  };
+
+  window.ipLookupExportAnalysisTxt = function () {
+    if (!lastAnalysisResult) return;
+    const lines = [
+      `分析日期時間：${lastAnalysisResult.analyzed_at}`,
+      `分析對象：${lastAnalysisResult.target}`,
+      `分析使用的廠牌與模型：Anthropic — ${lastAnalysisResult.model}`,
+      '',
+      lastAnalysisResult.content,
+    ];
+    downloadBlob(`analysis_${lastAnalysisResult.target}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
   };
 })();
