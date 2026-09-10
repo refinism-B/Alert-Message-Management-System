@@ -1,3 +1,5 @@
+import ipaddress
+
 import pytest
 import lookup
 
@@ -29,6 +31,21 @@ def test_query_rdap_whois_uses_rdap_when_available(monkeypatch):
     assert result["source"] == "RDAP（IANA bootstrap → rdap.apnic.net）"
     assert result["data"]["name"] == "example.com"
     assert "queried_at" in result
+
+
+def test_query_rdap_whois_sanitizes_non_json_native_types(monkeypatch):
+    monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
+    monkeypatch.setattr(
+        lookup.whoisit, "ip",
+        lambda t: {
+            "name": "8.8.8.0/24",
+            "network": {"cidr": ipaddress.ip_network("8.8.8.0/24")},
+            "links": [],
+        },
+    )
+    result = lookup.query_rdap_whois("8.8.8.8")
+    assert result["data"]["network"]["cidr"] == "8.8.8.0/24"
+    assert isinstance(result["data"]["network"]["cidr"], str)
 
 
 def test_query_rdap_whois_falls_back_to_whois_on_unsupported_tld(monkeypatch):

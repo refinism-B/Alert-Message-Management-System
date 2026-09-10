@@ -37,6 +37,16 @@ def _extract_rdap_host(raw: dict) -> Optional[str]:
     return None
 
 
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def query_rdap_whois(target: str) -> dict:
     target_type = classify_target(target)
     queried_at = _now_tw()
@@ -51,7 +61,7 @@ def query_rdap_whois(target: str) -> dict:
     if raw is not None:
         host = _extract_rdap_host(raw)
         source = f"RDAP（IANA bootstrap → {host}）" if host else "RDAP（IANA bootstrap）"
-        return {"target": target, "type": target_type, "source": source, "queried_at": queried_at, "data": raw}
+        return {"target": target, "type": target_type, "source": source, "queried_at": queried_at, "data": _json_safe(raw)}
 
     try:
         w = whois.whois(target)
@@ -66,7 +76,7 @@ def query_rdap_whois(target: str) -> dict:
         if not data:
             raise LookupFailedError("RDAP 與 WHOIS 查詢皆失敗：查無資料")
 
-    return {"target": target, "type": target_type, "source": "WHOIS 備援（TCP 43）", "queried_at": queried_at, "data": data}
+    return {"target": target, "type": target_type, "source": "WHOIS 備援（TCP 43）", "queried_at": queried_at, "data": _json_safe(data)}
 
 
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
