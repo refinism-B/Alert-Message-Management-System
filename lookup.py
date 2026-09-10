@@ -42,7 +42,7 @@ def query_rdap_whois(target: str) -> dict:
     try:
         whoisit.bootstrap()
         raw = whoisit.ip(target) if target_type == "ip" else whoisit.domain(target)
-    except (whoisit_errors.UnsupportedError, whoisit_errors.QueryError, whoisit_errors.BootstrapError):
+    except whoisit_errors.WhoisItError:
         raw = None
 
     if raw is not None:
@@ -56,7 +56,11 @@ def query_rdap_whois(target: str) -> dict:
         raise LookupFailedError(f"RDAP 與 WHOIS 查詢皆失敗：{e}") from e
 
     data = dict(w) if w else {}
-    if not data or not data.get("domain_name"):
-        raise LookupFailedError("RDAP 與 WHOIS 查詢皆失敗：查無資料")
+    if target_type == "domain":
+        if not data or not data.get("domain_name"):
+            raise LookupFailedError("RDAP 與 WHOIS 查詢皆失敗：查無資料")
+    else:
+        if not data:
+            raise LookupFailedError("RDAP 與 WHOIS 查詢皆失敗：查無資料")
 
     return {"target": target, "type": target_type, "source": "WHOIS 備援（TCP 43）", "queried_at": queried_at, "data": data}

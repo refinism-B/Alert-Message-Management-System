@@ -61,3 +61,19 @@ def test_query_rdap_whois_raises_when_both_fail(monkeypatch):
     monkeypatch.setattr(lookup.whois, "whois", raise_whois_error)
     with pytest.raises(lookup.LookupFailedError):
         lookup.query_rdap_whois("1.2.3.4")
+
+
+def test_query_rdap_whois_falls_back_to_whois_for_ip_target(monkeypatch):
+    monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
+
+    def raise_query_error(t):
+        raise lookup.whoisit_errors.QueryError("rdap down")
+
+    monkeypatch.setattr(lookup.whoisit, "ip", raise_query_error)
+    monkeypatch.setattr(
+        lookup.whois, "whois",
+        lambda t: {"netname": "EXAMPLE-NET", "cidr": "1.2.3.0/24"},
+    )
+    result = lookup.query_rdap_whois("1.2.3.4")
+    assert result["source"] == "WHOIS 備援（TCP 43）"
+    assert result["data"]["netname"] == "EXAMPLE-NET"
