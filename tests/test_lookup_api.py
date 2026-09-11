@@ -65,6 +65,18 @@ def test_lookup_vt_rate_limited_returns_429(client, monkeypatch):
     assert r.status_code == 429
 
 
+def test_lookup_vt_invalid_domain_returns_502(client, monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "test-key")
+
+    def raise_invalid_domain(target, api_key):
+        raise lookup.LookupFailedError("無效的查詢目標：domain 語法不合法")
+
+    monkeypatch.setattr(lookup, "query_virustotal", raise_invalid_domain)
+    r = client.get("/api/lookup/vt?target=invalid..domain")
+    assert r.status_code == 502
+    assert "語法不合法" in r.json()["detail"]
+
+
 def test_lookup_analyze_missing_api_key_returns_503(client, monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     r = client.post("/api/lookup/analyze", json={"target": "8.8.8.8", "rdap": {}, "vt": {}})

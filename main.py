@@ -86,6 +86,8 @@ def lookup_vt(target: str) -> models.VtLookupResponse:
         raise HTTPException(status_code=503, detail="請設定 VT_API_KEY")
     try:
         return lookup.query_virustotal(target, api_key)
+    except lookup.LookupFailedError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except lookup.VtQueryError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
