@@ -21,6 +21,7 @@
   let lastVtResult = null;
   let rdapDone = false;
   let vtDone = false;
+  let lastQueryTarget = null;
 
   window.ipLookupSwitchTab = function (tab) {
     document.querySelectorAll('.iplookup-tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
@@ -78,7 +79,9 @@
   function checkQueryComplete() {
     if (rdapDone && vtDone) {
       setQueryButtonDisabled(false);
-      document.getElementById('iplookup-analyze-btn').disabled = false;
+      if (lastRdapResult || lastVtResult) {
+        document.getElementById('iplookup-analyze-btn').disabled = false;
+      }
     }
   }
 
@@ -128,6 +131,7 @@
     lastVtResult = null;
     rdapDone = false;
     vtDone = false;
+    lastQueryTarget = target;
     setQueryButtonDisabled(true);
     document.getElementById('iplookup-analyze-btn').disabled = true;
     document.getElementById('iplookup-tab-btn-analysis').disabled = true;
@@ -158,7 +162,7 @@
   }
 
   window.ipLookupAnalyze = async function () {
-    const target = document.getElementById('iplookup-input').value.trim();
+    const target = lastQueryTarget;
     const btn = document.getElementById('iplookup-analyze-btn');
     btn.disabled = true;
     document.getElementById('iplookup-panel-analysis').innerHTML = '<div class="iplookup-loading">分析中...</div>';
