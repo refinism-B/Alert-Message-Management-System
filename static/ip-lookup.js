@@ -50,6 +50,134 @@
     return out;
   }
 
+  function markdownToHtml(md) {
+    const lines = String(md).replace(/\r\n/g, '\n').split('\n');
+    const out = [];
+    let para = [];
+    let list = [];
+    let quote = [];
+    let table = [];
+
+    function inline(text) {
+      let s = escapeHtml(text);
+      s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/`([^`]+?)`/g, '<code>$1</code>');
+      return s;
+    }
+
+    function flushPara() {
+      if (para.length) {
+        out.push(`<p>${para.join(' ')}</p>`);
+        para = [];
+      }
+    }
+    function flushList() {
+      if (list.length) {
+        out.push(`<ul>${list.map((item) => `<li>${item}</li>`).join('')}</ul>`);
+        list = [];
+      }
+    }
+    function flushQuote() {
+      if (quote.length) {
+        out.push(`<blockquote>${quote.join(' ')}</blockquote>`);
+        quote = [];
+      }
+    }
+    function flushTable() {
+      if (table.length) {
+        const [headerRow, ...bodyRows] = table;
+        const thead = `<tr>${headerRow.map((c) => `<th>${inline(c)}</th>`).join('')}</tr>`;
+        const tbody = bodyRows
+          .map((row) => `<tr>${row.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`)
+          .join('');
+        out.push(`<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`);
+        table = [];
+      }
+    }
+    function flushAll() {
+      flushPara();
+      flushList();
+      flushQuote();
+      flushTable();
+    }
+
+    function isTableRow(line) {
+      return line.startsWith('|') && line.endsWith('|') && line.length > 1;
+    }
+    function isTableSeparator(line) {
+      return /^[-:|\s]+$/.test(line) && line.includes('-');
+    }
+    function parseTableRow(line) {
+      return line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+    }
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+
+      if (line === '') {
+        flushAll();
+        continue;
+      }
+
+      const headerMatch = /^(#{1,3})\s+(.*)$/.exec(line);
+      if (headerMatch) {
+        flushAll();
+        const level = headerMatch[1].length;
+        out.push(`<h${level} class="iplookup-md-h${level}">${inline(headerMatch[2])}</h${level}>`);
+        continue;
+      }
+
+      if (line === '---') {
+        flushAll();
+        out.push('<hr>');
+        continue;
+      }
+
+      if (isTableRow(line)) {
+        if (isTableSeparator(line)) {
+          continue;
+        }
+        flushPara();
+        flushList();
+        flushQuote();
+        table.push(parseTableRow(line));
+        continue;
+      } else if (table.length) {
+        flushTable();
+      }
+
+      const bulletMatch = /^[-*]\s+(.*)$/.exec(line);
+      if (bulletMatch) {
+        flushPara();
+        flushQuote();
+        flushTable();
+        list.push(inline(bulletMatch[1]));
+        continue;
+      } else if (list.length) {
+        flushList();
+      }
+
+      const quoteMatch = /^>\s*(.*)$/.exec(line);
+      if (quoteMatch) {
+        flushPara();
+        flushList();
+        flushTable();
+        quote.push(inline(quoteMatch[1]));
+        continue;
+      } else if (quote.length) {
+        flushQuote();
+      }
+
+      flushList();
+      flushQuote();
+      flushTable();
+      para.push(inline(line));
+    }
+
+    flushAll();
+    return out.join('');
+  }
+
   function renderLookupError(tab, message) {
     document.getElementById(`iplookup-panel-${tab}`).innerHTML = `<div class="iplookup-error">${escapeHtml(message)}</div>`;
   }
@@ -155,7 +283,7 @@
         <div><span class="field-label">分析使用的廠牌與模型</span>Anthropic — ${escapeHtml(result.model)}</div>
       </div>
       <div class="iplookup-disclaimer">本分析僅供參考，非最終判斷，請自行核實原始資料</div>
-      <pre class="iplookup-analysis-content">${escapeHtml(result.content)}</pre>
+      <div class="iplookup-analysis-content">${markdownToHtml(result.content)}</div>
       <div class="iplookup-export">
         <button class="btn btn-secondary btn-sm" onclick="ipLookupExportAnalysisTxt()">匯出 TXT</button>
       </div>`;
