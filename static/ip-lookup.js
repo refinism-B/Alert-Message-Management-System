@@ -60,8 +60,13 @@
 
     function inline(text) {
       let s = escapeHtml(text);
+      const codeSpans = [];
+      s = s.replace(/`([^`]+?)`/g, (match, code) => {
+        codeSpans.push(`<code>${code}</code>`);
+        return `\x00CODE${codeSpans.length - 1}\x00`;
+      });
       s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      s = s.replace(/`([^`]+?)`/g, '<code>$1</code>');
+      s = s.replace(/\x00CODE(\d+)\x00/g, (match, i) => codeSpans[Number(i)]);
       return s;
     }
 
