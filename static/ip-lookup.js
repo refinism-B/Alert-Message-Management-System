@@ -176,6 +176,8 @@
         const err = await res.json().catch(() => ({}));
         document.getElementById('iplookup-panel-analysis').innerHTML =
           `<div class="iplookup-error">進階分析失敗：${res.status} ${escapeHtml(err.detail || '')}</div>`;
+        document.getElementById('iplookup-tab-btn-analysis').disabled = false;
+        ipLookupSwitchTab('analysis');
         return;
       }
       const result = await res.json();
@@ -185,6 +187,8 @@
     } catch (e) {
       document.getElementById('iplookup-panel-analysis').innerHTML =
         `<div class="iplookup-error">進階分析失敗：${escapeHtml(e.message)}</div>`;
+      document.getElementById('iplookup-tab-btn-analysis').disabled = false;
+      ipLookupSwitchTab('analysis');
     } finally {
       btn.disabled = false;
     }
