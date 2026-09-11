@@ -24,7 +24,7 @@ def test_query_rdap_whois_uses_rdap_when_available(monkeypatch):
     monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
     monkeypatch.setattr(
         lookup.whoisit, "domain",
-        lambda t: {"name": t, "links": [{"href": "https://rdap.apnic.net/domain/example.com"}]},
+        lambda t: {"name": t, "url": "https://rdap.apnic.net/domain/example.com"},
     )
     result = lookup.query_rdap_whois("example.com")
     assert result["type"] == "domain"
@@ -78,6 +78,41 @@ def test_query_rdap_whois_raises_when_both_fail(monkeypatch):
     monkeypatch.setattr(lookup.whois, "whois", raise_whois_error)
     with pytest.raises(lookup.LookupFailedError):
         lookup.query_rdap_whois("1.2.3.4")
+
+
+def test_query_rdap_whois_rejects_invalid_domain_syntax(monkeypatch):
+    called = {"bootstrap": False, "domain": False, "whois": False}
+    monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: called.__setitem__("bootstrap", True))
+    monkeypatch.setattr(lookup.whoisit, "domain", lambda t: called.__setitem__("domain", True))
+    monkeypatch.setattr(lookup.whois, "whois", lambda t: called.__setitem__("whois", True))
+    with pytest.raises(lookup.LookupFailedError):
+        lookup.query_rdap_whois("../users/me")
+    assert called == {"bootstrap": False, "domain": False, "whois": False}
+
+
+def test_query_rdap_whois_accepts_valid_domain(monkeypatch):
+    monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
+    monkeypatch.setattr(lookup.whoisit, "domain", lambda t: {"name": t, "url": ""})
+    result = lookup.query_rdap_whois("example.com")
+    assert result["target"] == "example.com"
+
+
+def test_query_virustotal_rejects_invalid_domain_syntax(monkeypatch):
+    def fake_get(url, headers=None, timeout=None):
+        raise AssertionError("network call should not happen for invalid domain")
+
+    monkeypatch.setattr(lookup.httpx, "get", fake_get)
+    with pytest.raises(lookup.LookupFailedError):
+        lookup.query_virustotal("not a domain!!", "test-key")
+
+
+def test_query_virustotal_accepts_valid_domain(monkeypatch):
+    def fake_get(url, headers=None, timeout=None):
+        return _FakeResponse(200, {"data": {}})
+
+    monkeypatch.setattr(lookup.httpx, "get", fake_get)
+    result = lookup.query_virustotal("example.com", "test-key")
+    assert result["target"] == "example.com"
 
 
 def test_query_rdap_whois_falls_back_to_whois_for_ip_target(monkeypatch):
@@ -201,6 +236,16 @@ def test_analyze_with_llm_notes_missing_rdap_data(monkeypatch):
     )
     result = lookup.analyze_with_llm("example.com", None, {"data": {}}, "fake-key", "claude-sonnet-5")
     assert result["content"].startswith("（RDAP 資料缺失，本分析僅根據 VT 資料）")
+
+
+def test_analyze_with_llm_notes_both_missing_data(monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        lookup.anthropic, "Anthropic",
+        lambda api_key: _FakeAnthropicClient(api_key, "現有資料不足以判斷", captured),
+    )
+    result = lookup.analyze_with_llm("example.com", None, None, "fake-key", "claude-sonnet-5")
+    assert result["content"].startswith("（RDAP 與 VT 資料皆缺失，本分析無可用輸入資料）")
 
 
 class _FailingMessages:

@@ -1,5 +1,6 @@
 import ipaddress
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from urllib.parse import urlparse
@@ -25,16 +26,21 @@ class LookupFailedError(Exception):
     """RDAP 與 WHOIS 皆查詢失敗"""
 
 
+_DOMAIN_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$")
+
+
+def _validate_domain(target: str) -> None:
+    if len(target) > 253 or not _DOMAIN_RE.match(target):
+        raise LookupFailedError(f"無效的查詢目標：{target}")
+
+
 def _now_tw() -> str:
     return datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S (UTC+8)")
 
 
 def _extract_rdap_host(raw: dict) -> Optional[str]:
-    for link in raw.get("links", []) or []:
-        href = link.get("href", "")
-        if href.startswith("http"):
-            return urlparse(href).netloc
-    return None
+    href = raw.get("url") or ""
+    return urlparse(href).netloc if href.startswith("http") else None
 
 
 def _json_safe(value):
@@ -49,11 +55,14 @@ def _json_safe(value):
 
 def query_rdap_whois(target: str) -> dict:
     target_type = classify_target(target)
+    if target_type == "domain":
+        _validate_domain(target)
     queried_at = _now_tw()
 
     raw = None
     try:
-        whoisit.bootstrap()
+        if not whoisit.is_bootstrapped() or whoisit.bootstrap_is_older_than(days=3):
+            whoisit.bootstrap()
         raw = whoisit.ip(target) if target_type == "ip" else whoisit.domain(target)
     except whoisit_errors.WhoisItError:
         raw = None
@@ -95,6 +104,8 @@ def _vt_path(target: str, target_type: str) -> str:
 
 def query_virustotal(target: str, api_key: str) -> dict:
     target_type = classify_target(target)
+    if target_type == "domain":
+        _validate_domain(target)
     queried_at = _now_tw()
     response = httpx.get(_vt_path(target, target_type), headers={"x-apikey": api_key}, timeout=10.0)
     if response.status_code != 200:
@@ -145,6 +156,8 @@ def _build_user_content(target: str, rdap: Optional[dict], vt: Optional[dict]) -
 
 
 def _missing_data_note(rdap: Optional[dict], vt: Optional[dict]) -> str:
+    if rdap is None and vt is None:
+        return "RDAP 與 VT 資料皆缺失，本分析無可用輸入資料"
     if rdap is None and vt is not None:
         return "RDAP 資料缺失，本分析僅根據 VT 資料"
     if vt is None and rdap is not None:
