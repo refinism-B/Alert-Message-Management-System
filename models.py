@@ -56,6 +56,21 @@ class VtLookupResponse(LookupResponseBase):
     pass
 
 
+class CompareRequest(BaseModel):
+    # 兩邊都可為 None：任一來源查詢失敗時仍要能比對剩下的那一份
+    rdap: Optional[dict] = None
+    vt: Optional[dict] = None
+
+
+class CompareResponse(BaseModel):
+    target: str
+    sources: list[dict]
+    rows: list[dict]
+    headline: Optional[str] = None
+    summary: dict
+    warnings: list[str] = []
+
+
 class AnalyzeRequest(BaseModel):
     target: str
     rdap: Optional[dict] = None

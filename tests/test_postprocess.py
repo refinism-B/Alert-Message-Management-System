@@ -417,6 +417,20 @@ def test_bulky_certificate_collapsed(vt_domain):
     assert section_of(view, "vt_last_https_certificate")["collapsed"] is True
 
 
+def test_parent_block_warning_shown_where_whois_is_read(vt_ip):
+    """誤判發生在讀 whois 原文的當下，警示要貼在那一段旁邊，不能只放在比對分頁。"""
+    processed = postprocess.process(vt_ip, now=NOW)
+    section = section_of(processed["view"], "vt_whois")
+    assert "上層委派" in section["note"]
+    assert "79.0.0.0/8" in section["note"]
+    assert any("上層委派" in w for w in processed["warnings"])
+
+
+def test_whois_section_lists_parsed_networks(vt_ip):
+    section = section_of(postprocess.process(vt_ip, now=NOW)["view"], "vt_whois")
+    assert "解析到的網段" in section["note"]
+
+
 def test_whois_free_text_preserved_verbatim(vt_ip):
     """whois 原文一律保留，不得被解析結果取代。"""
     view = postprocess.process(vt_ip, now=NOW)["view"]
@@ -499,3 +513,195 @@ def test_cidr_rejected_with_actionable_message(target):
 def test_plain_ip_and_domain_still_classified():
     assert lookup.classify_target("79.127.254.133") == "ip"
     assert lookup.classify_target("example.com") == "domain"
+
+
+# ---------------------------------------------------------------------------
+# whois 自由文字解析（原文件問題六）
+# ---------------------------------------------------------------------------
+
+ARIN_WHOIS = """NetRange: 79.0.0.0 - 79.255.255.255
+CIDR: 79.0.0.0/8
+NetName: 79-RIPE
+NetType: Allocated to RIPE NCC
+Organization: RIPE Network Coordination Centre (RIPE)
+RegDate: 2006-08-29
+Country: NL
+OrgAbuseEmail: abuse@ripe.net
+"""
+
+RIPE_WHOIS = """inetnum: 79.127.254.0 - 79.127.254.255
+netname: CDN77-VAN
+country: NL
+descr: Datacamp Limited
+abuse-mailbox: abuse@datacamp.co.uk
+"""
+
+
+def test_whois_text_parsed_into_key_values():
+    parsed = postprocess.parse_whois_text(ARIN_WHOIS)
+    assert parsed["cidr"] == ["79.0.0.0/8"]
+    assert parsed["organization"] == ["RIPE Network Coordination Centre (RIPE)"]
+
+
+def test_whois_comment_lines_ignored():
+    parsed = postprocess.parse_whois_text("% 這是註解: 不算欄位\n# another: no\ncountry: TW\n")
+    assert parsed == {"country": ["TW"]}
+
+
+def test_whois_range_converted_to_cidr():
+    """NetRange 是區間格式，要換算成 CIDR 才能做範圍比對。"""
+    assert "79.0.0.0/8" in postprocess.whois_networks(postprocess.parse_whois_text(ARIN_WHOIS))
+    ripe = postprocess.whois_networks(postprocess.parse_whois_text(RIPE_WHOIS))
+    assert ripe == ["79.127.254.0/24"]
+
+
+def test_whois_networks_empty_when_unparseable():
+    assert postprocess.whois_networks(postprocess.parse_whois_text("隨便一段沒有欄位的文字")) == []
+
+
+def test_parent_block_warning_when_whois_describes_upper_delegation():
+    """原文件問題六：whois 描述的是 79.0.0.0/8 → RIPE NCC，非目標的直接分配紀錄。"""
+    warning = postprocess.whois_scope_warning(ARIN_WHOIS, "79.127.254.133", "79.127.254.0/24")
+    assert warning is not None
+    assert "79.0.0.0/8" in warning
+    assert "上層委派" in warning
+    assert "RDAP" in warning
+
+
+def test_no_warning_when_whois_matches_the_allocation():
+    assert postprocess.whois_scope_warning(RIPE_WHOIS, "79.127.254.133", "79.127.254.0/24") is None
+
+
+def test_warning_when_target_outside_described_block():
+    warning = postprocess.whois_scope_warning(RIPE_WHOIS, "8.8.8.8", None)
+    assert warning is not None
+    assert "並未涵蓋查詢目標" in warning
+
+
+def test_whois_scope_check_is_noop_for_domains():
+    """domain 的 whois 文字裡沒有網段，不該跑這套規則也不該顯示警示。"""
+    assert postprocess.whois_scope_warning(ARIN_WHOIS, "example.com", None) is None
+
+
+def test_scope_check_survives_garbage_text():
+    assert postprocess.whois_scope_warning("", "1.2.3.4", None) is None
+    assert postprocess.whois_scope_warning("CIDR: 不是網段", "1.2.3.4", None) is None
+
+
+# ---------------------------------------------------------------------------
+# 語意事實抽取
+# ---------------------------------------------------------------------------
+
+def test_facts_from_whoisit(rdap_ip):
+    facts = postprocess._facts_from_whoisit(rdap_ip["data"])
+    assert facts["network"] == "79.127.254.0/24"
+    assert facts["country"] == "CA"
+    assert facts["abuse_email"] == "abuse@datacamp.co.uk"
+
+
+def test_facts_from_raw_rdap_reads_vcard(vt_ip):
+    """VT 內嵌的是 raw RFC 9083，聯絡資料藏在 vcard_array 裡，結構與 whoisit 完全不同。"""
+    rdap = vt_ip["data"]["data"]["attributes"]["rdap"]
+    facts = postprocess._facts_from_raw_rdap(rdap)
+    assert facts["network"] == "79.127.254.0/24"
+    assert facts["abuse_email"] == "abuse@datacamp.co.uk"
+    assert facts["registration_date"]
+
+
+def test_facts_from_whois_text_picks_parent_block(vt_ip):
+    text = vt_ip["data"]["data"]["attributes"]["whois"]
+    facts = postprocess._facts_from_whois_text(text)
+    assert facts["network"] == "79.0.0.0/8"
+    assert "RIPE" in facts["organization"]
+
+
+def test_network_normalization_ignores_formatting():
+    assert (postprocess._normalize_fact("network", "79.127.254.0/24")
+            == postprocess._normalize_fact("network", " 79.127.254.0/24 "))
+
+
+def test_date_normalization_compares_by_day():
+    a = postprocess._normalize_fact("registration_date", "2024-05-17 13:12:02+00:00")
+    b = postprocess._normalize_fact("registration_date", "2024-05-17T13:12:02Z")
+    assert a == b
+
+
+# ---------------------------------------------------------------------------
+# 跨來源比對（原文件問題四）
+# ---------------------------------------------------------------------------
+
+def test_rdap_and_vt_snapshot_agree_on_real_data(rdap_ip, vt_ip):
+    result = postprocess.compare_sources(rdap_ip, vt_ip, now=NOW)
+    assert result["summary"]["primary_count"] == 2
+    assert result["summary"]["conflict"] == 0
+    assert result["summary"]["agree"] >= 4
+    assert "完全一致" in result["headline"]
+
+
+def test_reference_sources_do_not_create_false_conflicts(rdap_ip, vt_ip):
+    """VT 屬性回報路由聚合網段、whois 原文描述上層區塊，兩者與 RDAP 不同都屬正常。
+    把它們算成「不一致」會讓每次查詢都跳出假警報。"""
+    result = postprocess.compare_sources(rdap_ip, vt_ip, now=NOW)
+    network_row = next(r for r in result["rows"] if r["key"] == "network")
+    assert network_row["status"] == "agree"
+    assert "VirusTotal WHOIS 原文" in network_row["differing_references"]
+    tiers = {s["label"]: s["tier"] for s in result["sources"]}
+    assert tiers["RDAP 獨立查詢"] == "primary"
+    assert tiers["VirusTotal 屬性"] == "reference"
+
+
+def test_parent_block_warning_surfaces_in_comparison(rdap_ip, vt_ip):
+    result = postprocess.compare_sources(rdap_ip, vt_ip, now=NOW)
+    assert any("上層委派" in w for w in result["warnings"])
+
+
+def test_real_conflict_between_primaries_is_reported(rdap_ip, vt_ip):
+    stale = copy.deepcopy(vt_ip)
+    stale["data"]["data"]["attributes"]["rdap"]["country"] = "XX"
+    result = postprocess.compare_sources(rdap_ip, stale, now=NOW)
+    country_row = next(r for r in result["rows"] if r["key"] == "country")
+    assert country_row["status"] == "conflict"
+    assert result["summary"]["conflict"] == 1
+    # 不一致不等於有一方錯，措辭不得暗示誰對誰錯
+    assert "不代表其中一方有誤" in result["headline"]
+
+
+def test_single_primary_cannot_judge_consistency(rdap_ip):
+    result = postprocess.compare_sources(rdap_ip, None, now=NOW)
+    assert result["headline"] is None
+    assert any("無法判定" in w for w in result["warnings"])
+
+
+def test_whois_fallback_is_reference_not_primary(whois_fallback, vt_domain):
+    """python-whois 的解析實測會欄位錯位，不能拿來當一致性判定的基準。"""
+    result = postprocess.compare_sources(whois_fallback, vt_domain, now=NOW)
+    tiers = {s["label"]: s["tier"] for s in result["sources"]}
+    assert tiers["WHOIS 備援查詢"] == "reference"
+
+
+def test_comparison_with_no_sources_does_not_crash():
+    result = postprocess.compare_sources(None, None)
+    assert result["rows"]
+    assert all(r["status"] == "missing" for r in result["rows"])
+    assert any("沒有任何可比對的來源" in w for w in result["warnings"])
+
+
+def test_comparison_tolerates_missing_vt_rdap(rdap_ip, vt_ip):
+    trimmed = copy.deepcopy(vt_ip)
+    trimmed["data"]["data"]["attributes"].pop("rdap")
+    result = postprocess.compare_sources(rdap_ip, trimmed, now=NOW)
+    assert "VirusTotal 內嵌 RDAP 快照" not in [s["label"] for s in result["sources"]]
+    assert result["summary"]["primary_count"] == 1
+
+
+def test_comparison_tolerates_non_dict_rdap(rdap_ip, vt_ip):
+    broken = copy.deepcopy(vt_ip)
+    broken["data"]["data"]["attributes"]["rdap"] = "不是物件"
+    result = postprocess.compare_sources(rdap_ip, broken, now=NOW)
+    assert result["rows"]
+
+
+def test_missing_fact_renders_as_not_provided(rdap_ip):
+    result = postprocess.compare_sources(rdap_ip, None, now=NOW)
+    asn_row = next(r for r in result["rows"] if r["key"] == "asn")
+    assert asn_row["values"]["RDAP 獨立查詢"] == "資料未提供"

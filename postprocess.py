@@ -975,13 +975,27 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
             note=("此為 VirusTotal 自行留存的 RDAP 快照，與「RDAP／WHOIS」分頁的獨立查詢"
                   "描述同一個物件，內容高度重複，且可能因快取而與即時查詢結果不同步。"))
 
-    # -- whois 自由文字：原文保留 --
+    # -- whois 自由文字：原文完整保留，但要標出它描述的可能不是查詢目標本身 --
     whois_text = attributes.get("whois")
     builder.consume_prefix(_VT_ATTR + "whois")
     if isinstance(whois_text, str) and whois_text.strip():
-        builder.add_section(
-            "vt_whois", "WHOIS 原文", "text", {"text": whois_text}, collapsed=True,
-            note="註冊局的 WHOIS 純文字輸出，未經解析，原樣保留。")
+        note = "註冊局的 WHOIS 純文字輸出，未經解析，原樣保留。"
+        # 警示貼在使用者實際閱讀 whois 原文的地方，而不是只放在比對分頁——
+        # 誤判就發生在讀這段文字的當下（實測 79.0.0.0/8 的窗口是 RIPE NCC，
+        # 但查詢目標其實屬於 Datacamp 的 /24 子網段）。
+        rdap_snapshot = attributes.get("rdap")
+        reference = attributes.get("network")
+        if isinstance(rdap_snapshot, dict):
+            reference = _facts_from_raw_rdap(rdap_snapshot).get("network") or reference
+        scope_warning = whois_scope_warning(whois_text, to_text(result.get("target")), reference)
+        if scope_warning:
+            builder.warn(scope_warning)
+            note = f"{scope_warning}\n\n{note}"
+        parsed_networks = whois_networks(parse_whois_text(whois_text))
+        if parsed_networks:
+            note += f"（解析到的網段：{'、'.join(parsed_networks)}）"
+        builder.add_section("vt_whois", "WHOIS 原文", "text", {"text": whois_text},
+                            collapsed=True, note=note)
 
     _add_legal_section(builder, VT_LABELS, prefix=_VT_ATTR)
 
@@ -1189,3 +1203,427 @@ def summarize_for_llm(result: Optional[dict]) -> str:
     for warning in view.get("warnings", []):
         lines.append(f"[注意] {warning}")
     return "\n".join(lines) if lines else "（無資料）"
+
+
+# ---------------------------------------------------------------------------
+# 跨來源比對（原文件問題四）
+# ---------------------------------------------------------------------------
+
+# 比對的是「正規化後的語意事實」，不是欄位路徑。
+# 路徑映射表在這裡行不通：whoisit、python-whois、VT 屬性、VT 內嵌的 raw RFC 9083
+# 四者結構層級差很多，映射表一旦某一方缺欄位就整段失效；抽事實則是抽不到就跳過。
+FACT_KEYS = [
+    ("network", "網段"),
+    ("asn", "ASN"),
+    ("organization", "組織／持有者"),
+    ("country", "國家／地區"),
+    ("registration_date", "註冊／分配時間"),
+    ("abuse_email", "濫用檢舉信箱"),
+]
+
+_EMPTY_FACTS = {key: None for key, _ in FACT_KEYS}
+
+
+def _first_non_empty(*values: Any) -> Any:
+    for value in values:
+        if not is_empty(value):
+            return value
+    return None
+
+
+def _entity_list(entities: Any, *roles: str) -> list[dict]:
+    if not isinstance(entities, dict):
+        return []
+    out = []
+    for role in roles:
+        items = entities.get(role)
+        if isinstance(items, list):
+            out.extend(e for e in items if isinstance(e, dict))
+    return out
+
+
+def _facts_from_whoisit(data: dict) -> dict:
+    facts = dict(_EMPTY_FACTS)
+    facts["network"] = data.get("network")
+    facts["asn"] = data.get("asn_range")
+    facts["country"] = data.get("country")
+    facts["registration_date"] = data.get("registration_date")
+
+    entities = data.get("entities")
+    org = _first_non_empty(*[e.get("name") for e in
+                            _entity_list(entities, "registrant", "registrar", "administrative")])
+    facts["organization"] = org
+    abuse = _first_non_empty(*[e.get("email") for e in _entity_list(entities, "abuse")])
+    if abuse is None:
+        abuse = _first_non_empty(*[e.get("email") for e in
+                                   _entity_list(entities, "technical", "administrative")])
+    facts["abuse_email"] = abuse
+    return facts
+
+
+def _facts_from_pywhois(data: dict) -> dict:
+    facts = dict(_EMPTY_FACTS)
+    facts["organization"] = _first_non_empty(data.get("registrant_organization"),
+                                             data.get("org"), data.get("registrar"))
+    facts["country"] = data.get("registrant_country")
+    facts["registration_date"] = data.get("creation_date")
+    facts["abuse_email"] = _first_non_empty(data.get("registrant_email"), data.get("emails"))
+    return facts
+
+
+def _facts_from_vt_attributes(attributes: dict) -> dict:
+    facts = dict(_EMPTY_FACTS)
+    facts["network"] = attributes.get("network")
+    facts["asn"] = attributes.get("asn")
+    facts["organization"] = _first_non_empty(attributes.get("as_owner"), attributes.get("registrar"))
+    facts["country"] = attributes.get("country")
+    facts["registration_date"] = attributes.get("creation_date")
+    return facts
+
+
+def _vcard_value(vcard: Any, name: str) -> Optional[str]:
+    """VT 把 RFC 9083 的 vcardArray 正規化成 [{name, type, values, parameters}]。"""
+    if not isinstance(vcard, list):
+        return None
+    for item in vcard:
+        if isinstance(item, dict) and item.get("name") == name:
+            values = item.get("values")
+            if isinstance(values, list) and values:
+                return to_text(values[0])
+    return None
+
+
+def _facts_from_raw_rdap(rdap: dict) -> dict:
+    """VT 內嵌的是 raw RFC 9083，欄位結構與 whoisit 的正規化輸出完全不同。"""
+    facts = dict(_EMPTY_FACTS)
+    cidrs = rdap.get("cidr0_cidrs")
+    if isinstance(cidrs, list) and cidrs and isinstance(cidrs[0], dict):
+        prefix = _first_non_empty(cidrs[0].get("v4prefix"), cidrs[0].get("v6prefix"))
+        length = cidrs[0].get("length")
+        if prefix and length is not None:
+            facts["network"] = f"{prefix}/{length}"
+    if facts["network"] is None:
+        start, end = rdap.get("start_address"), rdap.get("end_address")
+        if start and end:
+            facts["network"] = _range_to_cidr(str(start), str(end)) or f"{start} - {end}"
+    facts["country"] = rdap.get("country")
+
+    events = rdap.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if isinstance(event, dict) and to_text(event.get("event_action")).lower() == "registration":
+                facts["registration_date"] = event.get("event_date")
+                break
+
+    entities = rdap.get("entities")
+    if isinstance(entities, list):
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+            roles = [to_text(r).lower() for r in (entity.get("roles") or [])]
+            name = _vcard_value(entity.get("vcard_array"), "fn")
+            email = _vcard_value(entity.get("vcard_array"), "email")
+            if "registrant" in roles and facts["organization"] is None:
+                facts["organization"] = _first_non_empty(name, entity.get("handle"))
+            if "abuse" in roles and facts["abuse_email"] is None:
+                facts["abuse_email"] = email
+    return facts
+
+
+# ---------------------------------------------------------------------------
+# whois 自由文字解析（原文件問題六）
+# ---------------------------------------------------------------------------
+
+# 刻意不為每個 RIR 各寫一支解析器——五個 RIR 乘上格式變動是維護黑洞。
+# 改用通用的 key: value 逐行解析，只認得幾個已知的網段關鍵字，抓不到就什麼都不做。
+_WHOIS_LINE_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 _-]{0,40}?)\s*:\s*(.*?)\s*$")
+_WHOIS_NETWORK_KEYS = ("netrange", "cidr", "inetnum", "inet6num", "route", "route6")
+_WHOIS_ORG_KEYS = ("organization", "orgname", "org-name", "descr", "netname", "owner")
+_WHOIS_COUNTRY_KEYS = ("country",)
+_WHOIS_DATE_KEYS = ("regdate", "created", "creation date")
+_WHOIS_ABUSE_KEYS = ("orgabuseemail", "abuse-mailbox", "abusecontactemail", "abuse contact email")
+
+
+def parse_whois_text(text: str) -> dict[str, list[str]]:
+    """把 whois 純文字解析成 {小寫欄位名: [值, ...]}。解析不到就回空 dict。"""
+    parsed: dict[str, list[str]] = {}
+    if not isinstance(text, str):
+        return parsed
+    for line in text.splitlines():
+        if line.lstrip().startswith(("#", "%")):
+            continue
+        match = _WHOIS_LINE_RE.match(line)
+        if not match:
+            continue
+        key, value = match.group(1).strip().lower(), match.group(2).strip()
+        if not value:
+            continue
+        parsed.setdefault(key, []).append(value)
+    return parsed
+
+
+def _range_to_cidr(start: str, end: str) -> Optional[str]:
+    try:
+        networks = list(ipaddress.summarize_address_range(
+            ipaddress.ip_address(start.strip()), ipaddress.ip_address(end.strip())))
+    except ValueError:
+        return None
+    return "; ".join(str(n) for n in networks) if networks else None
+
+
+def whois_networks(parsed: dict[str, list[str]]) -> list[str]:
+    """從解析結果取出網段。NetRange 的區間格式先換算成 CIDR。"""
+    out: list[str] = []
+    for key in _WHOIS_NETWORK_KEYS:
+        for value in parsed.get(key, []):
+            if "-" in value and "/" not in value:
+                start, _, end = value.partition("-")
+                converted = _range_to_cidr(start, end)
+                if converted:
+                    out.extend(converted.split("; "))
+                continue
+            try:
+                out.append(str(ipaddress.ip_network(value.strip(), strict=False)))
+            except ValueError:
+                continue
+    seen, unique = set(), []
+    for item in out:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return unique
+
+
+def _facts_from_whois_text(text: str) -> dict:
+    parsed = parse_whois_text(text)
+    facts = dict(_EMPTY_FACTS)
+    networks = whois_networks(parsed)
+    facts["network"] = "; ".join(networks) if networks else None
+    for key in _WHOIS_ORG_KEYS:
+        if parsed.get(key):
+            facts["organization"] = parsed[key][0]
+            break
+    for key in _WHOIS_COUNTRY_KEYS:
+        if parsed.get(key):
+            facts["country"] = parsed[key][0]
+            break
+    for key in _WHOIS_DATE_KEYS:
+        if parsed.get(key):
+            facts["registration_date"] = parsed[key][0]
+            break
+    for key in _WHOIS_ABUSE_KEYS:
+        if parsed.get(key):
+            facts["abuse_email"] = parsed[key][0]
+            break
+    if parsed.get("originas"):
+        facts["asn"] = parsed["originas"][0]
+    return facts
+
+
+def whois_scope_warning(text: str, target: str, reference_network: Optional[str] = None) -> Optional[str]:
+    """判斷 whois 文字描述的區塊是否其實是上層委派區塊，而非目標的直接分配紀錄。
+
+    措辭刻意中性：上層委派紀錄本身沒有錯，錯的是把它讀成目標的聯絡窗口。
+    """
+    try:
+        address = ipaddress.ip_address(target)
+    except ValueError:
+        return None  # domain 的 whois 文字裡沒有網段，整條規則 no-op
+
+    networks = whois_networks(parse_whois_text(text))
+    if not networks:
+        return None
+
+    parsed_networks = []
+    for item in networks:
+        try:
+            parsed_networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            continue
+    if not parsed_networks:
+        return None
+
+    covering = [n for n in parsed_networks if address in n]
+    if not covering:
+        shown = "、".join(str(n) for n in parsed_networks)
+        return (f"⚠️ 此 WHOIS 文字描述的區塊為 {shown}，並未涵蓋查詢目標 {target}，"
+                "其內容與本次查詢目標無直接關係，請以 RDAP 區塊為準。")
+
+    block = min(covering, key=lambda n: n.num_addresses)
+    reference = None
+    if reference_network:
+        try:
+            reference = ipaddress.ip_network(reference_network, strict=False)
+        except ValueError:
+            reference = None
+
+    if reference is not None and block.prefixlen < reference.prefixlen:
+        return (f"⚠️ 此 WHOIS 文字描述的區塊為 {block}，範圍大於 RDAP 回報的 {reference}，"
+                f"屬於上層委派紀錄而非 {target} 的直接分配資訊。"
+                "其中的組織與聯絡窗口是上層機構（通常為 RIR），"
+                "請以 RDAP 的 registrant／abuse 欄位為準。")
+    if reference is None and block.prefixlen <= 8:
+        return (f"⚠️ 此 WHOIS 文字描述的區塊為 {block}，範圍極大，"
+                "多半是 RIR 層級的委派紀錄而非目標的直接分配資訊，請以 RDAP 欄位為準。")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 事實比對
+# ---------------------------------------------------------------------------
+
+def _normalize_fact(key: str, value: Any) -> Optional[str]:
+    """比對用的正規化值。顯示仍用原值——正規化只影響「算不算一致」。"""
+    if is_empty(value):
+        return None
+    if key == "network":
+        try:
+            return str(ipaddress.ip_network(to_text(value).split(";")[0].strip(), strict=False))
+        except ValueError:
+            return to_text(value).strip().lower()
+    if key == "registration_date":
+        dt = parse_time(value, "registration_date") or parse_time(value, "creation_date")
+        return dt.date().isoformat() if dt else to_text(value).strip().lower()
+    if key == "asn":
+        return re.sub(r"^(as)?", "", to_text(value).strip().lower())
+    return " ".join(to_text(value).strip().lower().split())
+
+
+def _display_fact(key: str, value: Any, now: Optional[datetime]) -> str:
+    if is_empty(value):
+        return "資料未提供"
+    if key == "registration_date":
+        return describe_time(value, "registration_date", now=now) or to_text(value)
+    return to_text(value)
+
+
+# 來源分層。一致性判定只看 primary——把每個來源平等地丟進「一致/不一致」會製造
+# 大量假警報：VirusTotal 屬性回報的是路由聚合網段（實測 /19）而非分配區塊（/24），
+# whois 原文常描述上層委派區塊，兩者與 RDAP 不同都屬正常而非資料錯誤。
+TIER_PRIMARY = "primary"
+TIER_REFERENCE = "reference"
+
+
+def collect_sources(rdap_result: Optional[dict], vt_result: Optional[dict]) -> list[dict]:
+    """把可用的來源整理成 [{label, tier, facts, note}]。取不到的來源直接不列，不報錯。"""
+    sources: list[dict] = []
+
+    if rdap_result:
+        data = rdap_result.get("data") or {}
+        if detect_profile(rdap_result) == "pywhois":
+            sources.append({"label": "WHOIS 備援查詢", "tier": TIER_REFERENCE,
+                            "facts": _facts_from_pywhois(data),
+                            "note": _PYWHOIS_RELIABILITY_WARNING})
+        else:
+            sources.append({"label": "RDAP 獨立查詢", "tier": TIER_PRIMARY,
+                            "facts": _facts_from_whoisit(data), "note": None})
+
+    if vt_result:
+        payload = (vt_result.get("data") or {}).get("data") or {}
+        attributes = payload.get("attributes") or {}
+        if attributes:
+            sources.append({
+                "label": "VirusTotal 屬性", "tier": TIER_REFERENCE,
+                "facts": _facts_from_vt_attributes(attributes),
+                "note": ("VirusTotal 回報的網段是路由聚合結果、組織名取自 ASN 持有者，"
+                         "與 RDAP 的分配區塊及註冊人名稱粒度不同，不一致屬正常。"),
+            })
+        rdap_snapshot = attributes.get("rdap")
+        if isinstance(rdap_snapshot, dict) and rdap_snapshot:
+            sources.append({
+                "label": "VirusTotal 內嵌 RDAP 快照", "tier": TIER_PRIMARY,
+                "facts": _facts_from_raw_rdap(rdap_snapshot),
+                "note": "VirusTotal 自行留存的快照，與即時查詢之間可能存在時間差。",
+            })
+        whois_text = attributes.get("whois")
+        if isinstance(whois_text, str) and whois_text.strip():
+            sources.append({
+                "label": "VirusTotal WHOIS 原文", "tier": TIER_REFERENCE,
+                "facts": _facts_from_whois_text(whois_text),
+                "note": ("由純文字解析而來，不同註冊局格式不一，屬 best-effort；"
+                         "內容也可能描述上層委派區塊而非查詢目標本身。"),
+            })
+    return sources
+
+
+def compare_sources(rdap_result: Optional[dict], vt_result: Optional[dict],
+                    now: Optional[datetime] = None) -> dict:
+    """跨來源比對。一致的只顯示一次，不一致的並陳雙方數值供人工判斷。
+
+    不一致不等於有一方錯：VT 的內嵌快照有時間差，whois 原文可能描述上層委派區塊。
+    因此措辭只陳述差異，不暗示誰對誰錯。
+    """
+    sources = collect_sources(rdap_result, vt_result)
+    primary_labels = [s["label"] for s in sources if s["tier"] == TIER_PRIMARY]
+    target = (rdap_result or vt_result or {}).get("target", "")
+    rows, agreements, conflicts = [], 0, 0
+
+    for key, label in FACT_KEYS:
+        values, normalized = {}, {}
+        for source in sources:
+            raw = source["facts"].get(key)
+            values[source["label"]] = _display_fact(key, raw, now)
+            norm = _normalize_fact(key, raw)
+            if norm is not None:
+                normalized[source["label"]] = norm
+
+        primary_values = {k: v for k, v in normalized.items() if k in primary_labels}
+        distinct = set(primary_values.values())
+        if not distinct:
+            status = "missing" if not normalized else "reference_only"
+        elif len(distinct) == 1:
+            status = "agree" if len(primary_values) >= 2 else "single"
+            if status == "agree":
+                agreements += 1
+        else:
+            status = "conflict"
+            conflicts += 1
+
+        # 參考來源與權威來源不同時標示出來，但不計入一致性判定
+        differing_references = sorted(
+            k for k, v in normalized.items()
+            if k not in primary_labels and distinct and v not in distinct)
+        rows.append({"key": key, "label": label, "values": values, "status": status,
+                     "provided_by": sorted(normalized),
+                     "differing_references": differing_references})
+
+    warnings: list[str] = []
+    if vt_result:
+        attributes = ((vt_result.get("data") or {}).get("data") or {}).get("attributes") or {}
+        whois_text = attributes.get("whois")
+        reference = None
+        if rdap_result:
+            reference = (rdap_result.get("data") or {}).get("network")
+        reference = reference or attributes.get("network")
+        if isinstance(whois_text, str) and target:
+            scope_warning = whois_scope_warning(whois_text, target, reference)
+            if scope_warning:
+                warnings.append(scope_warning)
+
+    if not sources:
+        warnings.append("本次沒有任何可比對的來源（RDAP 與 VirusTotal 皆未取得資料）。")
+    elif len(primary_labels) < 2:
+        listed = "、".join(primary_labels) or "無"
+        warnings.append(
+            f"可用於一致性判定的權威來源只有 {len(primary_labels)} 個（{listed}），"
+            "下表僅供欄位對照，無法判定兩來源是否同步。")
+
+    headline = None
+    if len(primary_labels) >= 2:
+        joined = "與".join(primary_labels)
+        if conflicts == 0:
+            headline = f"{joined}所描述的事實完全一致（{agreements} 項可比對欄位）。"
+        else:
+            headline = (f"{joined}之間有 {conflicts} 項事實不一致；"
+                        "這不代表其中一方有誤，較可能是快照與即時查詢的時間差，"
+                        "請以取得時間較新者為準。")
+
+    return {
+        "target": target,
+        "sources": [{"label": s["label"], "tier": s["tier"], "note": s["note"]} for s in sources],
+        "rows": rows,
+        "headline": headline,
+        "summary": {"agree": agreements, "conflict": conflicts,
+                    "source_count": len(sources), "primary_count": len(primary_labels)},
+        "warnings": warnings,
+    }

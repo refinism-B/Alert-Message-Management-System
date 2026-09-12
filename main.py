@@ -103,6 +103,13 @@ def lookup_vt(target: str) -> models.VtLookupResponse:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
+@app.post("/api/lookup/compare")
+def lookup_compare(body: models.CompareRequest) -> models.CompareResponse:
+    """跨來源比對。比對的是正規化後的語意事實，不是欄位路徑——RDAP、WHOIS 備援、
+    VirusTotal 屬性與其內嵌的 raw RDAP 四者結構差異太大，路徑映射表撐不住。"""
+    return postprocess.compare_sources(body.rdap, body.vt)
+
+
 @app.post("/api/lookup/analyze")
 def lookup_analyze(body: models.AnalyzeRequest) -> models.AnalyzeResponse:
     api_key = os.environ.get("LLM_API_KEY")

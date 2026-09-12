@@ -10,10 +10,12 @@
     <div class="iplookup-tabs">
       <button class="iplookup-tab-btn active" data-tab="rdap" onclick="ipLookupSwitchTab('rdap')">RDAP／WHOIS</button>
       <button class="iplookup-tab-btn" data-tab="vt" onclick="ipLookupSwitchTab('vt')">VirusTotal</button>
+      <button id="iplookup-tab-btn-compare" class="iplookup-tab-btn" data-tab="compare" disabled onclick="ipLookupSwitchTab('compare')">來源比對</button>
       <button id="iplookup-tab-btn-analysis" class="iplookup-tab-btn" data-tab="analysis" disabled onclick="ipLookupSwitchTab('analysis')">進階分析</button>
     </div>
     <div id="iplookup-panel-rdap" class="iplookup-panel active"><div class="iplookup-empty">尚未查詢</div></div>
     <div id="iplookup-panel-vt" class="iplookup-panel"><div class="iplookup-empty">尚未查詢</div></div>
+    <div id="iplookup-panel-compare" class="iplookup-panel"><div class="iplookup-empty">尚未查詢</div></div>
     <div id="iplookup-panel-analysis" class="iplookup-panel"><div class="iplookup-empty">尚未分析</div></div>
   `;
 
@@ -22,6 +24,7 @@
   let rdapDone = false;
   let vtDone = false;
   let lastQueryTarget = null;
+  let lastCompareResult = null;
 
   window.ipLookupSwitchTab = function (tab) {
     document.querySelectorAll('.iplookup-tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
@@ -348,6 +351,115 @@
     panel.innerHTML = meta + warnings + body + exportBtns;
   }
 
+  const COMPARE_STATUS = {
+    agree: { text: '一致', cls: 'tone-ok' },
+    conflict: { text: '不一致', cls: 'tone-risk' },
+    single: { text: '僅一個權威來源提供', cls: '' },
+    reference_only: { text: '僅參考來源提供', cls: '' },
+    missing: { text: '皆無資料', cls: '' },
+  };
+
+  function renderCompare(result) {
+    lastCompareResult = result;
+    const panel = document.getElementById('iplookup-panel-compare');
+    const sources = result.sources || [];
+    const labels = sources.map((s) => s.label);
+
+    const headline = result.headline
+      ? `<div class="iplookup-callout ${result.summary.conflict ? 'tone-warn' : 'tone-ok'}">` +
+        `${escapeHtml(result.headline)}</div>`
+      : '';
+    const warnings = (result.warnings || [])
+      .map((w) => `<div class="iplookup-callout tone-warn">${escapeHtml(w)}</div>`).join('');
+
+    // 來源分層要講清楚，否則使用者會把「參考來源不同」誤讀成資料有錯
+    const legend = sources.map((s) => {
+      const tier = s.tier === 'primary' ? '權威來源' : '參考來源';
+      const tierCls = s.tier === 'primary' ? 'tone-ok' : '';
+      const note = s.note ? `<div class="iplookup-sum-note">${escapeHtml(s.note)}</div>` : '';
+      return `<div class="iplookup-sum-label">${escapeHtml(s.label)}</div>` +
+             `<div class="iplookup-sum-value"><span class="iplookup-chip ${tierCls}">${tier}</span>${note}</div>`;
+    }).join('');
+
+    const header = ['事實', ...labels, '判定']
+      .map((c) => `<th>${escapeHtml(c)}</th>`).join('');
+    const body = (result.rows || []).map((row) => {
+      const status = COMPARE_STATUS[row.status] || { text: row.status, cls: '' };
+      const cells = labels.map((label) => {
+        const value = row.values[label];
+        const missing = value === '資料未提供';
+        const differs = (row.differing_references || []).includes(label);
+        const cls = missing ? 'is-missing' : (differs ? 'tone-warn' : '');
+        return `<td class="${cls}">${escapeHtml(value === undefined ? '' : value)}</td>`;
+      }).join('');
+      // 差異說明放表格上方講一次即可；每列各寫一遍反而把表格變成新的雜訊來源
+      return `<tr><td>${escapeHtml(row.label)}</td>${cells}` +
+             `<td class="${status.cls}">${escapeHtml(status.text)}</td></tr>`;
+    }).join('');
+
+    panel.innerHTML = headline + warnings +
+      '<div class="iplookup-section" style="padding-bottom:4px">' +
+      '<div class="iplookup-summary-title" style="margin:10px 14px">來源分層</div>' +
+      `<div class="iplookup-summary-grid" style="margin:0 14px 12px">${legend}</div></div>` +
+      '<div class="iplookup-note">一致性判定只看「權威來源」之間是否相符。' +
+      '參考來源的值以黃色標示，代表與權威來源不同——這通常不是錯誤（例如 VirusTotal 回報的是路由聚合網段、' +
+      'WHOIS 原文可能描述上層委派區塊），故不列入判定。</div>' +
+      `<div class="iplookup-table-wrap"><table class="iplookup-table"><thead><tr>${header}</tr></thead>` +
+      `<tbody>${body}</tbody></table></div>` +
+      '<div class="iplookup-export">' +
+      '<button class="btn btn-secondary btn-sm" onclick="ipLookupExportCompareTxt()">匯出 TXT</button></div>';
+  }
+
+  async function fetchCompare() {
+    const panel = document.getElementById('iplookup-panel-compare');
+    const btn = document.getElementById('iplookup-tab-btn-compare');
+    if (!lastRdapResult && !lastVtResult) {
+      panel.innerHTML = '<div class="iplookup-empty">RDAP 與 VirusTotal 皆未取得資料，無法比對</div>';
+      return;
+    }
+    panel.innerHTML = '<div class="iplookup-loading">比對中...</div>';
+    try {
+      const res = await fetch('/api/lookup/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rdap: lastRdapResult, vt: lastVtResult }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        panel.innerHTML = `<div class="iplookup-error">來源比對失敗：${res.status} ${escapeHtml(err.detail || '')}</div>`;
+        return;
+      }
+      renderCompare(await res.json());
+      btn.disabled = false;
+    } catch (e) {
+      panel.innerHTML = `<div class="iplookup-error">來源比對失敗：${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  window.ipLookupExportCompareTxt = function () {
+    if (!lastCompareResult) return;
+    const r = lastCompareResult;
+    const labels = (r.sources || []).map((s) => s.label);
+    const lines = [`比對目標：${r.target}`, ''];
+    if (r.headline) lines.push(r.headline, '');
+    (r.warnings || []).forEach((w) => lines.push(`[注意] ${w}`));
+    lines.push('', '【來源分層】');
+    (r.sources || []).forEach((s) => {
+      lines.push(`${s.label}：${s.tier === 'primary' ? '權威來源' : '參考來源'}` +
+                 (s.note ? `（${s.note}）` : ''));
+    });
+    lines.push('', '【事實比對】');
+    lines.push(['事實', ...labels, '判定'].join(' | '));
+    (r.rows || []).forEach((row) => {
+      const status = (COMPARE_STATUS[row.status] || {}).text || row.status;
+      lines.push([row.label, ...labels.map((l) => row.values[l] ?? ''), status].join(' | '));
+      if ((row.differing_references || []).length) {
+        lines.push(`  （參考來源 ${row.differing_references.join('、')} 的值不同，不列入判定）`);
+      }
+    });
+    downloadBlob(`compare_${sanitizeFilename(r.target)}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
+  };
+
   function setQueryButtonDisabled(disabled) {
     document.getElementById('iplookup-query-btn').disabled = disabled;
   }
@@ -358,6 +470,8 @@
       if (lastRdapResult || lastVtResult) {
         document.getElementById('iplookup-analyze-btn').disabled = false;
       }
+      // 跨來源比對需要兩邊的結果，只能等兩個查詢都結束才發動
+      fetchCompare();
     }
   }
 
@@ -411,7 +525,10 @@
     setQueryButtonDisabled(true);
     document.getElementById('iplookup-analyze-btn').disabled = true;
     document.getElementById('iplookup-tab-btn-analysis').disabled = true;
+    document.getElementById('iplookup-tab-btn-compare').disabled = true;
+    lastCompareResult = null;
     document.getElementById('iplookup-panel-analysis').innerHTML = '<div class="iplookup-empty">尚未分析</div>';
+    document.getElementById('iplookup-panel-compare').innerHTML = '<div class="iplookup-loading">等待兩邊查詢完成...</div>';
     document.getElementById('iplookup-panel-rdap').innerHTML = '<div class="iplookup-loading">查詢中...</div>';
     document.getElementById('iplookup-panel-vt').innerHTML = '<div class="iplookup-loading">查詢中...</div>';
 
