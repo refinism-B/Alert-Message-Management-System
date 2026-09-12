@@ -33,6 +33,8 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // 純攤平，不做任何摘要或壓縮。摘要交給後端 view，這裡只負責
+  // 「檢視原始資料」與 CSV 匯出——兩者都要求一欄不少。
   function flattenForDisplay(data, prefix = '') {
     const out = {};
     for (const [key, value] of Object.entries(data || {})) {
@@ -40,9 +42,23 @@
       if (value === null || value === undefined) {
         out[label] = '';
       } else if (Array.isArray(value)) {
-        out[label] = value.map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : v)).join('; ');
+        if (value.length === 0) {
+          out[label] = '';
+        } else {
+          value.forEach((item, i) => {
+            if (item !== null && typeof item === 'object') {
+              Object.assign(out, flattenForDisplay(item, `${label}[${i}]`));
+            } else {
+              out[`${label}[${i}]`] = String(item);
+            }
+          });
+        }
       } else if (typeof value === 'object') {
-        Object.assign(out, flattenForDisplay(value, label));
+        if (Object.keys(value).length === 0) {
+          out[label] = '';
+        } else {
+          Object.assign(out, flattenForDisplay(value, label));
+        }
       } else {
         out[label] = String(value);
       }
@@ -183,6 +199,123 @@
     return out.join('');
   }
 
+  const TONE_CLASS = { risk: 'tone-risk', warn: 'tone-warn', ok: 'tone-ok' };
+
+  function valueText(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  }
+
+  function pathAttr(path) {
+    return path ? ` title="原始欄位：${escapeHtml(path)}"` : '';
+  }
+
+  // 翻譯只加不取代：欄位顯示中文名，原始路徑保留在 title 供分析師回頭核對
+  function renderFieldRows(rows) {
+    if (!rows || !rows.length) return '';
+    return '<div class="report-fields">' + rows.map((r) =>
+      `<span class="field-label"${pathAttr(r.path)}>${escapeHtml(r.label)}</span>` +
+      `<span class="field-value">${escapeHtml(valueText(r.value))}</span>`).join('') + '</div>';
+  }
+
+  function renderSummary(summary) {
+    if (!summary || !summary.length) return '';
+    const rows = summary.map((item) => {
+      const cls = ['iplookup-sum-value'];
+      if (item.missing) cls.push('is-missing');
+      if (item.tone && TONE_CLASS[item.tone]) cls.push(TONE_CLASS[item.tone]);
+      const note = item.note ? `<div class="iplookup-sum-note">${escapeHtml(item.note)}</div>` : '';
+      return `<div class="iplookup-sum-label"${pathAttr(item.path)}>${escapeHtml(item.label)}</div>` +
+             `<div class="${cls.join(' ')}">${escapeHtml(item.value)}${note}</div>`;
+    }).join('');
+    return `<div class="iplookup-summary"><div class="iplookup-summary-title">摘要</div>` +
+           `<div class="iplookup-summary-grid">${rows}</div></div>`;
+  }
+
+  function renderEngines(engines) {
+    if (!engines) return '';
+    // 「尚無掃描結果」與「掃過且無異常」必須看起來完全不同
+    if (!engines.available) {
+      return `<div class="iplookup-callout tone-warn">${escapeHtml(engines.reason)}</div>`;
+    }
+    const stats = engines.stats || {};
+    const chipDefs = [['惡意', stats.malicious, 'tone-risk'], ['可疑', stats.suspicious, 'tone-warn'],
+                      ['無害', stats.harmless, 'tone-ok'], ['未偵測', stats.undetected, ''],
+                      ['逾時', stats.timeout, '']];
+    const chips = chipDefs.filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v, c]) => `<span class="iplookup-chip ${c}">${k} ${v}</span>`).join('');
+    let body = `<div class="iplookup-chips">${chips}` +
+               `<span class="iplookup-chip">共 ${engines.total} 家引擎</span></div>`;
+    if (engines.mismatch) {
+      body += `<div class="iplookup-callout tone-warn">${escapeHtml(engines.mismatch)}</div>`;
+    }
+    if (engines.abnormal && engines.abnormal.length) {
+      body += '<table class="iplookup-table"><thead><tr><th>引擎</th><th>判定</th><th>結果</th><th>方法</th></tr></thead><tbody>' +
+        engines.abnormal.map((x) => {
+          const tone = x.category === 'malicious' ? 'tone-risk' : 'tone-warn';
+          return `<tr><td>${escapeHtml(x.engine)}</td><td class="${tone}">${escapeHtml(x.category)}</td>` +
+                 `<td>${escapeHtml(x.result)}</td><td>${escapeHtml(x.method)}</td></tr>`;
+        }).join('') + '</tbody></table>';
+    } else if (engines.all_clear_text) {
+      body += `<div class="iplookup-callout tone-ok">${escapeHtml(engines.all_clear_text)}</div>`;
+    }
+    if (engines.inconclusive && engines.inconclusive.length) {
+      const names = engines.inconclusive.map((x) => `${x.engine}（${x.category}）`).join('、');
+      body += `<details class="iplookup-sub"><summary>${engines.inconclusive.length} 家引擎未取得結論（逾時／不支援等），不計入異常</summary>` +
+              `<div class="iplookup-note">${escapeHtml(names)}</div></details>`;
+    }
+    return body;
+  }
+
+  function renderTable(table, count) {
+    if (!table) return '';
+    let out = '';
+    const constants = Object.entries(table.constant || {});
+    if (constants.length) {
+      out += `<div class="iplookup-note">以下 ${count} 筆的這些欄位值全部相同：` +
+        constants.map(([k, v]) => `<code>${escapeHtml(k)}</code> = ${escapeHtml(valueText(v))}`).join('、') + '</div>';
+    }
+    if (table.empty_columns && table.empty_columns.length) {
+      out += `<div class="iplookup-note">已隱藏在所有筆數中皆為空的欄位：${escapeHtml(table.empty_columns.join('、'))}</div>`;
+    }
+    if (!table.columns || !table.columns.length) return out;
+    out += '<div class="iplookup-table-wrap"><table class="iplookup-table"><thead><tr>' +
+      table.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join('') + '</tr></thead><tbody>' +
+      table.rows.map((row) => `<tr>${row.map((c) => `<td>${escapeHtml(valueText(c))}</td>`).join('')}</tr>`).join('') +
+      '</tbody></table></div>';
+    return out;
+  }
+
+  function renderSection(section) {
+    let inner;
+    if (section.kind === 'engines') inner = renderEngines(section.engines);
+    else if (section.kind === 'table') inner = renderTable(section.table, section.count);
+    else if (section.kind === 'text') inner = `<pre class="iplookup-pre">${escapeHtml(section.text || '')}</pre>`;
+    else inner = renderFieldRows(section.rows || []);
+    const note = section.note ? `<div class="iplookup-note">${escapeHtml(section.note)}</div>` : '';
+    const open = section.collapsed ? '' : ' open';
+    return `<details class="iplookup-section"${open}><summary>${escapeHtml(section.title)}</summary>` +
+           `${note}${inner}</details>`;
+  }
+
+  function renderHidden(hidden) {
+    if (!hidden || !hidden.count) return '';
+    const rows = hidden.fields.map((f) => ({ label: f.label, path: f.path, value: `（${f.reason}）` }));
+    return `<details class="iplookup-section"><summary>已隱藏 ${hidden.count} 個欄位` +
+           `（其中 ${hidden.empty_count} 個為空值）</summary>` +
+           '<div class="iplookup-note">「欄位存在但未填寫」與「來源根本沒有這個欄位」的判讀意義不同，' +
+           '因此空欄位只收合、不刪除。</div>' + renderFieldRows(rows) + '</details>';
+  }
+
+  function renderRaw(data) {
+    const flat = flattenForDisplay(data);
+    const rows = Object.entries(flat).map(([k, v]) => ({ label: k, path: k, value: v }));
+    return `<details class="iplookup-section"><summary>檢視原始資料（${rows.length} 個欄位）</summary>` +
+           '<div class="iplookup-note">未經任何摘要或摺疊處理的完整回應內容。</div>' +
+           renderFieldRows(rows) + '</details>';
+  }
+
   function renderLookupError(tab, message) {
     document.getElementById(`iplookup-panel-${tab}`).innerHTML = `<div class="iplookup-error">${escapeHtml(message)}</div>`;
   }
@@ -194,15 +327,25 @@
         <div><span class="field-label">資料來源</span>${escapeHtml(result.source)}</div>
         <div><span class="field-label">查詢日期時間</span>${escapeHtml(result.queried_at)}</div>
       </div>`;
-    const rows = Object.entries(flattenForDisplay(result.data))
-      .map(([k, v]) => `<div class="report-fields"><span class="field-label">${escapeHtml(k)}</span><span class="field-value">${escapeHtml(v)}</span></div>`)
-      .join('');
+    const warnings = (result.warnings || [])
+      .map((w) => `<div class="iplookup-callout tone-warn">${escapeHtml(w)}</div>`).join('');
+    let body;
+    if (result.view) {
+      body = renderSummary(result.view.summary) +
+             (result.view.sections || []).map(renderSection).join('') +
+             renderHidden(result.view.hidden) +
+             renderRaw(result.data);
+    } else {
+      // 後端未提供 view（舊版或後處理停用）時退回原本的全欄位攤平呈現
+      body = renderFieldRows(Object.entries(flattenForDisplay(result.data))
+        .map(([k, v]) => ({ label: k, path: k, value: v })));
+    }
     const exportBtns = `
       <div class="iplookup-export">
-        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportTxt('${tab}')">匯出 TXT</button>
-        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportCsv('${tab}')">匯出 CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportTxt('${tab}')">匯出 TXT（摘要）</button>
+        <button class="btn btn-secondary btn-sm" onclick="ipLookupExportCsv('${tab}')">匯出 CSV（完整）</button>
       </div>`;
-    panel.innerHTML = meta + rows + exportBtns;
+    panel.innerHTML = meta + warnings + body + exportBtns;
   }
 
   function setQueryButtonDisabled(disabled) {
@@ -359,13 +502,70 @@
     return String(s).replace(/[\\/:*?"<>|]/g, '_');
   }
 
+  // 匯出分工：TXT 給人看（摘要視圖），CSV 給機器／存證（完整攤平，一欄不少）。
+  // 匯出檔常被當成工單附件或證據保存，因此完整性優先於版面。
+  const EXPORT_PII_NOTE = '※ 內容可能包含註冊人姓名、地址、電話等個人資料，請依所屬單位規定保管。';
+
+  function viewToLines(view) {
+    const lines = [];
+    if (view.summary && view.summary.length) {
+      lines.push('【摘要】');
+      view.summary.forEach((item) => {
+        lines.push(`${item.label}：${item.value}${item.note ? `（${item.note}）` : ''}`);
+      });
+    }
+    (view.warnings || []).forEach((w) => lines.push(`[注意] ${w}`));
+    (view.sections || []).forEach((section) => {
+      lines.push('', `【${section.title}】`);
+      if (section.note) lines.push(`（${section.note}）`);
+      if (section.kind === 'engines') {
+        const engines = section.engines || {};
+        if (!engines.available) {
+          lines.push(engines.reason || '');
+          return;
+        }
+        lines.push(`共 ${engines.total} 家引擎；異常 ${engines.counts.abnormal} 家、` +
+                   `正常 ${engines.counts.normal} 家、未取得結論 ${engines.counts.inconclusive} 家`);
+        if (engines.mismatch) lines.push(`[注意] ${engines.mismatch}`);
+        engines.abnormal.forEach((x) => lines.push(`  - ${x.engine}：${x.category} / ${x.result}`));
+        if (!engines.abnormal.length && engines.all_clear_text) lines.push(engines.all_clear_text);
+      } else if (section.kind === 'text') {
+        lines.push(section.text || '');
+      } else if (section.kind === 'table') {
+        const table = section.table || {};
+        Object.entries(table.constant || {}).forEach(([k, v]) => lines.push(`（全部相同）${k}：${valueText(v)}`));
+        if (table.columns && table.columns.length) {
+          lines.push(table.columns.join(' | '));
+          (table.rows || []).forEach((row) => lines.push(row.map(valueText).join(' | ')));
+        }
+      } else {
+        (section.rows || []).forEach((r) => lines.push(`${r.label}：${valueText(r.value)}`));
+      }
+    });
+    if (view.hidden && view.hidden.count) {
+      lines.push('', `【已隱藏欄位】共 ${view.hidden.count} 個（其中 ${view.hidden.empty_count} 個為空值）`);
+      view.hidden.fields.forEach((f) => lines.push(`${f.label}（${f.path}）：${f.reason}`));
+    }
+    return lines;
+  }
+
   window.ipLookupExportTxt = function (tab) {
     const result = resultForTab(tab);
     if (!result) return;
-    const lines = [`資料來源：${result.source}`, `查詢日期時間：${result.queried_at}`, ''];
-    const flat = flattenForDisplay(result.data);
-    for (const [k, v] of Object.entries(flat)) {
-      lines.push(`${k}：${v}`);
+    const lines = [
+      `查詢目標：${result.target}`,
+      `資料來源：${result.source}`,
+      `查詢日期時間：${result.queried_at}`,
+      '',
+      '※ 本檔為摘要視圖，欄位經整理與摺疊；完整內容請改用 CSV 匯出。',
+      EXPORT_PII_NOTE,
+      '',
+    ];
+    if (result.view) {
+      lines.push(...viewToLines(result.view));
+    } else {
+      const flat = flattenForDisplay(result.data);
+      for (const [k, v] of Object.entries(flat)) lines.push(`${k}：${v}`);
     }
     downloadBlob(`${tab}_${sanitizeFilename(result.target)}.txt`, lines.join('\n'), 'text/plain;charset=utf-8');
   };
@@ -373,7 +573,14 @@
   window.ipLookupExportCsv = function (tab) {
     const result = resultForTab(tab);
     if (!result) return;
-    const rows = [['欄位', '值'], ['資料來源', result.source], ['查詢日期時間', result.queried_at]];
+    const rows = [
+      ['欄位', '值'],
+      ['# 說明', '完整原始欄位，未套用任何摘要或摺疊規則'],
+      ['# 個資提醒', EXPORT_PII_NOTE.replace('※ ', '')],
+      ['查詢目標', result.target],
+      ['資料來源', result.source],
+      ['查詢日期時間', result.queried_at],
+    ];
     const flat = flattenForDisplay(result.data);
     for (const [k, v] of Object.entries(flat)) {
       rows.push([k, v]);

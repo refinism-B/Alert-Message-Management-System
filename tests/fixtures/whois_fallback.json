@@ -1,0 +1,31 @@
+{
+  "target": "nic.tw",
+  "type": "domain",
+  "source": "WHOIS 備援（TCP 43）",
+  "queried_at": "2026-09-12 12:27:33 (UTC+8)",
+  "data": {
+    "domain_name": "nic.tw",
+    "creation_date": "2025-07-14 16:00:00+00:00",
+    "expiration_date": "2099-12-31 23:59:59+00:00",
+    "name_servers": null,
+    "registrar": "TWNIC",
+    "registrar_url": "https://rs.twnic.tw/",
+    "registrant_name": "財團法人台灣網路資訊中心",
+    "registrant_organization": "財團法人台灣網路資訊中心",
+    "registrant_city": null,
+    "registrant_street": "(Redacted for privacy)",
+    "registrant_state_province": null,
+    "registrant_country": "Administrative Contact:",
+    "registrant_phone": null,
+    "registrant_fax": null,
+    "registrant_email": "Taiwan Network Information Center",
+    "admin": null,
+    "admin_email": "(Redacted for privacy)",
+    "admin_phone": null,
+    "admin_fax": null,
+    "tech": null,
+    "tech_email": "(Redacted for privacy)",
+    "tech_phone": null,
+    "tech_fax": null
+  }
+}

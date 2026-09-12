@@ -10,6 +10,7 @@ import os
 import database
 import lookup
 import models
+import postprocess
 
 app = FastAPI()
 
@@ -71,10 +72,18 @@ def search(
     return {"reports": reports}
 
 
+def _with_view(result: dict) -> dict:
+    """附上後處理視圖。原始 data 不動，後處理失敗也不影響查詢結果本身。"""
+    processed = postprocess.process(result)
+    return {**result, "view": processed["view"], "warnings": processed["warnings"]}
+
+
 @app.get("/api/lookup/rdap")
 def lookup_rdap(target: str) -> models.RdapLookupResponse:
     try:
-        return lookup.query_rdap_whois(target)
+        return _with_view(lookup.query_rdap_whois(target))
+    except lookup.UnsupportedTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except lookup.LookupFailedError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -85,7 +94,9 @@ def lookup_vt(target: str) -> models.VtLookupResponse:
     if not api_key:
         raise HTTPException(status_code=503, detail="請設定 VT_API_KEY")
     try:
-        return lookup.query_virustotal(target, api_key)
+        return _with_view(lookup.query_virustotal(target, api_key))
+    except lookup.UnsupportedTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except lookup.LookupFailedError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except lookup.VtQueryError as e:
@@ -104,7 +115,18 @@ def lookup_analyze(body: models.AnalyzeRequest) -> models.AnalyzeResponse:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+class NoCacheStaticFiles(StaticFiles):
+    """靜態檔案（尤其 index.html／ip-lookup.js）開發中頻繁變動，瀏覽器的
+    啟發式快取常導致重新整理後仍看到舊版。強制每次請求都向伺服器驗證，
+    避免「明明改好了但畫面沒更新」的困惑。"""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", NoCacheStaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

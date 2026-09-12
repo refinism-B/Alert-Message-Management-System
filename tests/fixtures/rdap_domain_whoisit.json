@@ -1,0 +1,48 @@
+{
+  "target": "example.com",
+  "type": "domain",
+  "source": "RDAP（IANA bootstrap → rdap.verisign.com）",
+  "queried_at": "2026-09-12 12:27:32 (UTC+8)",
+  "data": {
+    "handle": "2336799_DOMAIN_COM-VRSN",
+    "parent_handle": "",
+    "name": "EXAMPLE.COM",
+    "whois_server": "",
+    "type": "domain",
+    "terms_of_service_url": "https://www.verisign.com/domain-names/registration-data-access-protocol/terms-service/index.xhtml",
+    "copyright_notice": "",
+    "description": [],
+    "last_changed_date": "2026-08-14 08:01:43+00:00",
+    "registration_date": "1995-08-14 04:00:00+00:00",
+    "expiration_date": "2027-08-13 04:00:00+00:00",
+    "url": "https://rdap.verisign.com/com/v1/domain/example.com",
+    "rir": "",
+    "entities": {
+      "registrar": [
+        {
+          "handle": "376",
+          "type": "entity",
+          "name": "RESERVED-Internet Assigned Numbers Authority"
+        }
+      ],
+      "abuse": [
+        {
+          "type": "entity",
+          "name": "",
+          "email": ""
+        }
+      ]
+    },
+    "unicode_name": "",
+    "nameservers": [
+      "ELLIOTT.NS.CLOUDFLARE.COM",
+      "HERA.NS.CLOUDFLARE.COM"
+    ],
+    "status": [
+      "client delete prohibited",
+      "client transfer prohibited",
+      "client update prohibited"
+    ],
+    "dnssec": true
+  }
+}

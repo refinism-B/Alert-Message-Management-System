@@ -14,12 +14,36 @@ from whoisit import errors as whoisit_errors
 TW_TZ = timezone(timedelta(hours=8))
 
 
+class UnsupportedTargetError(Exception):
+    """查詢目標的型態本系統不支援（例如 CIDR 網段）"""
+
+
 def classify_target(value: str) -> Literal["ip", "domain"]:
     try:
         ipaddress.ip_address(value)
         return "ip"
     except ValueError:
-        return "domain"
+        pass
+    _reject_network(value)
+    return "domain"
+
+
+def _reject_network(value: str) -> None:
+    """CIDR 網段一律明確拒絕。
+
+    若不攔，`79.0.0.0/8` 會因為不是單一 IP 而被當成 domain，再被網域格式檢查
+    擋掉，使用者只會看到「無效的查詢目標」這種對不上原因的訊息。VirusTotal
+    API v3 也只有 /ip_addresses/{ip} 與 /domains/{domain}，沒有網段端點。
+    """
+    if "/" not in value:
+        return
+    try:
+        network = ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return
+    raise UnsupportedTargetError(
+        f"本系統不支援網段查詢（{value}）。請改輸入單一 IP（例如 {network.network_address}）或網域。"
+    )
 
 
 class LookupFailedError(Exception):

@@ -1,0 +1,91 @@
+{
+  "target": "79.127.254.133",
+  "type": "ip",
+  "source": "RDAP（IANA bootstrap → rdap.db.ripe.net）",
+  "queried_at": "2026-09-12 12:27:30 (UTC+8)",
+  "data": {
+    "handle": "79.127.254.0 - 79.127.254.255",
+    "parent_handle": "79.127.128.0 - 79.127.255.255",
+    "name": "CDN77-VAN",
+    "whois_server": "whois.ripe.net",
+    "type": "ip network",
+    "terms_of_service_url": "http://www.ripe.net/db/support/db-terms-conditions.pdf",
+    "copyright_notice": "",
+    "description": [],
+    "last_changed_date": "2024-05-17 13:12:02+00:00",
+    "registration_date": "2024-05-17 13:12:02+00:00",
+    "expiration_date": null,
+    "url": "https://rdap.db.ripe.net/ip/79.127.254.133",
+    "rir": "ripe",
+    "entities": {
+      "registrant": [
+        {
+          "handle": "DATACAMP-MNT",
+          "url": "https://rdap.db.ripe.net/entity/DATACAMP-MNT",
+          "type": "entity",
+          "rir": "ripe",
+          "name": "DATACAMP-MNT"
+        }
+      ],
+      "administrative": [
+        {
+          "handle": "DLTS1-RIPE",
+          "url": "https://rdap.db.ripe.net/entity/DLTS1-RIPE",
+          "type": "entity",
+          "rir": "ripe",
+          "name": "Datacamp Ltd. technical staff",
+          "address": {
+            "po_box": "",
+            "ext_address": "",
+            "street_address": "",
+            "locality": "",
+            "region": "",
+            "postal_code": "",
+            "country": ""
+          },
+          "email": "abuse@datacamp.co.uk"
+        }
+      ],
+      "technical": [
+        {
+          "handle": "DLTS1-RIPE",
+          "url": "https://rdap.db.ripe.net/entity/DLTS1-RIPE",
+          "type": "entity",
+          "rir": "ripe",
+          "name": "Datacamp Ltd. technical staff",
+          "address": {
+            "po_box": "",
+            "ext_address": "",
+            "street_address": "",
+            "locality": "",
+            "region": "",
+            "postal_code": "",
+            "country": ""
+          },
+          "email": "abuse@datacamp.co.uk"
+        }
+      ],
+      "abuse": [
+        {
+          "handle": "AC28308-RIPE",
+          "type": "entity",
+          "name": "Abuse Contact",
+          "address": {
+            "po_box": "",
+            "ext_address": "",
+            "street_address": "",
+            "locality": "",
+            "region": "",
+            "postal_code": "",
+            "country": ""
+          },
+          "email": "abuse@datacamp.co.uk"
+        }
+      ]
+    },
+    "country": "CA",
+    "ip_version": 4,
+    "assignment_type": "assigned pa",
+    "network": "79.127.254.0/24"
+  }
+}

@@ -36,20 +36,24 @@ class SearchResult(BaseModel):
     reports: list[ReportResponse]
 
 
-class RdapLookupResponse(BaseModel):
+class LookupResponseBase(BaseModel):
     target: str
     type: Literal["ip", "domain"]
     source: str
     queried_at: str
+    # data 永遠是未經加工的原始回應；view 是後處理產出的摘要視圖。
+    # 兩者並存，任何後處理規則都不會成為資料的唯一出口。
     data: dict
+    view: Optional[dict] = None
+    warnings: list[str] = []
 
 
-class VtLookupResponse(BaseModel):
-    target: str
-    type: Literal["ip", "domain"]
-    source: str
-    queried_at: str
-    data: dict
+class RdapLookupResponse(LookupResponseBase):
+    pass
+
+
+class VtLookupResponse(LookupResponseBase):
+    pass
 
 
 class AnalyzeRequest(BaseModel):
