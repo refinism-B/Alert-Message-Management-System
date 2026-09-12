@@ -563,11 +563,9 @@
       const res = await fetch('/api/lookup/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target,
-          rdap: lastRdapResult ? lastRdapResult.data : null,
-          vt: lastVtResult ? lastVtResult.data : null,
-        }),
+        // 送完整查詢結果而非只送 data：後端要靠 source 判斷是哪一套 schema
+        // （whoisit / python-whois / VirusTotal），才能給 LLM 整理過的資料
+        body: JSON.stringify({ target, rdap: lastRdapResult, vt: lastVtResult }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

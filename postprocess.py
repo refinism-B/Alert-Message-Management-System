@@ -1167,9 +1167,26 @@ def flatten_for_export(data: Any) -> dict[str, str]:
     return {path: to_text(value) for path, value in flatten(data).items()}
 
 
+# 送進 LLM 時略過的區塊。理由不是「體積大」而是「對判讀沒有新資訊」：
+# vt_rdap 與 RDAP 那一份是同一組事實（重複餵會讓模型誤以為有兩個獨立佐證）、
+# 憑證內部欄位與法律樣板則本來就不進風險判讀。
+_LLM_SKIP_SECTIONS = {"vt_rdap", "vt_last_https_certificate", "raw_rdap", "legal"}
+
+_LLM_SKIP_REASON = {
+    "vt_rdap": "與 RDAP/WHOIS 區段描述同一物件，為避免同一組事實被當成兩個獨立佐證，此處不重複列出",
+    "vt_last_https_certificate": "HTTPS 憑證原始欄位，與風險屬性判讀無關",
+    "raw_rdap": "RDAP 原始回應，內容已由上方欄位涵蓋",
+    "legal": "註冊局固定樣板文字",
+}
+
+
 def summarize_for_llm(result: Optional[dict]) -> str:
-    """給 LLM 的精簡輸入：只給摘要與各區塊的非空欄位，省掉大量空欄位、
-    重複 entity 與 89 家引擎的原始字串。"""
+    """給 LLM 的精簡輸入：摘要 + 各區塊的非空欄位，略過空欄位、重複 entity、
+    89 家引擎的原始字串，以及與其他區段重複的內容。
+
+    每一列都帶原始欄位路徑——SYSTEM_PROMPT 要求模型為每項風險屬性標註欄位路徑
+    供分析師回查，翻譯後的中文名稱不能取代路徑。
+    """
     if not result:
         return "（無資料）"
     processed = process(result)
@@ -1178,16 +1195,29 @@ def summarize_for_llm(result: Optional[dict]) -> str:
     for item in view["summary"]:
         path = f"（{item['path']}）" if item.get("path") else ""
         lines.append(f"{item['label']}{path}: {item['value']}")
+        if item.get("note"):
+            lines.append(f"    註：{item['note']}")
+
     for section in view["sections"]:
+        if section["id"] in _LLM_SKIP_SECTIONS:
+            lines.append(f"[{section['title']}] （已略過：{_LLM_SKIP_REASON[section['id']]}）")
+            continue
+        if section.get("note"):
+            lines.append(f"[{section['title']}] 說明：{section['note']}")
         if section["kind"] == "engines":
             engines = section.get("engines") or {}
             if not engines.get("available"):
                 lines.append(f"[{section['title']}] {engines.get('reason', '')}")
                 continue
-            lines.append(f"[{section['title']}] 共 {engines['total']} 家；"
-                         f"異常 {engines['counts']['abnormal']} 家")
+            counts = engines["counts"]
+            lines.append(f"[{section['title']}] 共 {engines['total']} 家；異常 "
+                         f"{counts['abnormal']} 家、正常 {counts['normal']} 家、"
+                         f"未取得結論 {counts['inconclusive']} 家")
+            if engines.get("mismatch"):
+                lines.append(f"  [注意] {engines['mismatch']}")
             for entry in engines["abnormal"]:
-                lines.append(f"  - {entry['engine']}: {entry['category']} / {entry['result']}")
+                lines.append(f"  - {entry['engine']}（data.attributes.last_analysis_results."
+                             f"{entry['engine']}.category）: {entry['category']} / {entry['result']}")
             continue
         if section["kind"] == "text":
             lines.append(f"[{section['title']}]\n{section.get('text', '')}")
@@ -1200,8 +1230,17 @@ def summarize_for_llm(result: Optional[dict]) -> str:
             continue
         for row in section.get("rows", []):
             lines.append(f"[{section['title']}] {row['label']}（{row['path']}）: {row['value']}")
+
+    hidden = view.get("hidden") or {}
+    if hidden.get("count"):
+        lines.append(f"[已省略欄位] {hidden['count']} 個欄位在來源中存在但為空值，"
+                     "屬於「來源未填寫」而非「本系統未取得」。")
+    # 警示常常已經附在對應區塊的說明裡（例如 whois 母網段警示）。再貼一次不會更
+    # 安全，只會讓模型把同一則提醒讀成兩筆各自獨立的觀察。
+    emitted = "\n".join(lines)
     for warning in view.get("warnings", []):
-        lines.append(f"[注意] {warning}")
+        if warning not in emitted:
+            lines.append(f"[注意] {warning}")
     return "\n".join(lines) if lines else "（無資料）"
 
 

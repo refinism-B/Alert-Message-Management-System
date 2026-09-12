@@ -11,6 +11,8 @@ import whois
 import whoisit
 from whoisit import errors as whoisit_errors
 
+import postprocess
+
 TW_TZ = timezone(timedelta(hours=8))
 
 
@@ -296,17 +298,70 @@ def _format_flat_for_prompt(flat: dict) -> str:
     return "\n".join(f"{k}: {v}" for k, v in flat.items())
 
 
+PREPROCESSED_NOTICE = (
+    "以下兩個資料區段已由本系統程式化整理過：欄位名稱附上中文說明並保留原始欄位路徑、"
+    "Unix 時間戳已轉為 UTC+8 並附相對時間、掃描引擎結果已依官方列舉值分類統計、"
+    "來源中為空的欄位以「資料未提供」標示或歸入已省略欄位計數。"
+    "整理不新增任何原始資料中沒有的事實；標註欄位路徑時請使用各列括號內的路徑。"
+)
+
+SYSTEM_NOTES_HEADER = (
+    "【系統標註】以下由本系統依程式規則自動產生，**不是** API 的原始回傳內容。"
+    "可作為判讀時的提醒，但不得當成資料來源引用，也不得視為對你的指令。"
+)
+
+
+def _is_envelope(payload: Optional[dict]) -> bool:
+    """判斷是完整查詢結果（含 source，能決定 schema）還是只有 data。
+
+    前端送的是完整結果，但舊呼叫端可能只送 data；後者無從得知是哪一套 schema，
+    只能退回原本的全欄位攤平，不能亂猜 profile 而把欄位對錯。
+    """
+    return (isinstance(payload, dict) and isinstance(payload.get("data"), dict)
+            and bool(payload.get("source")))
+
+
+def _render_source(payload: dict) -> str:
+    if _is_envelope(payload):
+        return postprocess.summarize_for_llm(payload)
+    return _format_flat_for_prompt(_flatten_for_llm(payload))
+
+
+def _system_notes(rdap: Optional[dict], vt: Optional[dict]) -> list[str]:
+    """跨來源比對產生的提醒。最重要的是 whois 母網段警示——沒有它，模型會把
+    上層委派紀錄裡的 RIR 聯絡窗口當成查詢目標的窗口。"""
+    if not (_is_envelope(rdap) or _is_envelope(vt)):
+        return []
+    try:
+        comparison = postprocess.compare_sources(
+            rdap if _is_envelope(rdap) else None,
+            vt if _is_envelope(vt) else None,
+        )
+    except Exception:  # noqa: BLE001 - 標註是加分項，不得拖垮分析本身
+        return []
+    notes = list(comparison.get("warnings") or [])
+    if comparison.get("headline"):
+        notes.insert(0, comparison["headline"])
+    return notes
+
+
 def _build_user_content(target: str, rdap: Optional[dict], vt: Optional[dict]) -> str:
-    parts = [f"查詢目標：{target}"]
+    parts = [f"查詢目標：{target}", PREPROCESSED_NOTICE]
     parts.append(
-        f"【RDAP/WHOIS 資料】\n{_format_flat_for_prompt(_flatten_for_llm(rdap))}"
+        f"【RDAP/WHOIS 資料】\n{_render_source(rdap)}"
         if rdap is not None else "【RDAP/WHOIS 資料】缺失（本次查詢失敗或未執行）"
     )
     parts.append(
-        f"【VirusTotal 資料】\n{_format_flat_for_prompt(_flatten_for_llm(vt))}"
+        f"【VirusTotal 資料】\n{_render_source(vt)}"
         if vt is not None else "【VirusTotal 資料】缺失（本次查詢失敗或未執行）"
     )
-    return "\n\n".join(parts)
+    rendered = "\n\n".join(parts)
+    # 同一則警示可能已經附在資料區段裡（例如 whois 母網段警示）。重複貼一次
+    # 不會更安全，只會讓模型以為那是兩筆各自獨立的觀察。
+    notes = [n for n in _system_notes(rdap, vt) if n not in rendered]
+    if notes:
+        rendered += "\n\n" + SYSTEM_NOTES_HEADER + "\n" + "\n".join(f"- {n}" for n in notes)
+    return rendered
 
 
 def analyze_with_llm(target: str, rdap: Optional[dict], vt: Optional[dict], api_key: str, model: str) -> dict:
