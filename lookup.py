@@ -323,7 +323,10 @@ def _is_envelope(payload: Optional[dict]) -> bool:
 
 def _render_source(payload: dict) -> str:
     if _is_envelope(payload):
-        return postprocess.summarize_for_llm(payload)
+        # 報告格式要求填「查詢時間」與「資料來源」。不給的話模型只能從其他時間
+        # 欄位反推（實測它會寫「依 VT 資料最後更新時間推算」），沒必要讓它猜。
+        header = f"資料來源：{payload.get('source', '')}\n查詢時間：{payload.get('queried_at', '')}"
+        return f"{header}\n{postprocess.summarize_for_llm(payload)}"
     return _format_flat_for_prompt(_flatten_for_llm(payload))
 
 
@@ -364,21 +367,43 @@ def _build_user_content(target: str, rdap: Optional[dict], vt: Optional[dict]) -
     return rendered
 
 
+def _extract_text(message) -> str:
+    """取出回應中的文字內容。
+
+    不能用 `message.content[0].text`：目前的模型預設開啟 adaptive thinking，
+    第一個 block 會是 ThinkingBlock（沒有 .text，取用會 AttributeError）。
+    """
+    if getattr(message, "stop_reason", None) == "refusal":
+        details = getattr(message, "stop_details", None)
+        category = getattr(details, "category", None) or "未分類"
+        raise LlmQueryError(
+            403, f"LLM 進階分析失敗：模型基於安全考量拒絕回應此請求（類別：{category}）")
+    text = "".join(
+        block.text for block in (message.content or []) if getattr(block, "type", None) == "text"
+    ).strip()
+    if getattr(message, "stop_reason", None) == "max_tokens":
+        text += "\n\n⚠️ 回應在達到輸出上限時被截斷，以上內容可能不完整。"
+    return text
+
+
 def analyze_with_llm(target: str, rdap: Optional[dict], vt: Optional[dict], api_key: str, model: str) -> dict:
     client = anthropic.Anthropic(api_key=api_key)
     create_kwargs = dict(
         model=model,
-        max_tokens=1024,
-        temperature=0,
+        # Claude Sonnet 5 起 thinking token 也計入 max_tokens，1024 會在還沒寫完
+        # 報告前就被截斷（stop_reason=max_tokens），導致格式檢查必定失敗。
+        max_tokens=16000,
+        # temperature / top_p / top_k 在 Sonnet 5、Opus 5 等模型上已被移除，
+        # 送出會直接 400 `temperature is deprecated for this model`。
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": f"【使用者提供資料】\n{_build_user_content(target, rdap, vt)}"}],
     )
     try:
         message = client.messages.create(**create_kwargs)
-        content = message.content[0].text
+        content = _extract_text(message)
         if not _is_well_formed(content):
             message = client.messages.create(**create_kwargs)
-            content = message.content[0].text
+            content = _extract_text(message)
             if not _is_well_formed(content):
                 content = f"⚠️ 本次分析輸出未完全符合固定格式，以下為原始回應內容：\n\n{content}"
     except anthropic.APIStatusError as e:

@@ -178,12 +178,24 @@ def test_query_virustotal_rate_limited_raises_with_status(monkeypatch):
 
 class _FakeContentBlock:
     def __init__(self, text):
+        self.type = "text"
         self.text = text
 
 
+class _FakeThinkingBlock:
+    """目前的模型預設開啟 adaptive thinking，回應的第一個 block 是 ThinkingBlock，
+    它沒有 .text。測試替身若省略這一塊，就驗不出 content[0].text 這種取法的錯。"""
+
+    def __init__(self, thinking="（思考內容）"):
+        self.type = "thinking"
+        self.thinking = thinking
+
+
 class _FakeMessage:
-    def __init__(self, text):
-        self.content = [_FakeContentBlock(text)]
+    def __init__(self, text, stop_reason="end_turn"):
+        self.content = [_FakeThinkingBlock(), _FakeContentBlock(text)]
+        self.stop_reason = stop_reason
+        self.stop_details = None
 
 
 class _FakeMessages:
@@ -221,7 +233,60 @@ def test_analyze_with_llm_builds_prompt_and_returns_metadata(monkeypatch):
     assert len(captured) == 1
     assert captured[0]["model"] == "claude-sonnet-5"
     assert captured[0]["system"] == lookup.SYSTEM_PROMPT
-    assert captured[0]["temperature"] == 0
+    # temperature / top_p / top_k 在 Sonnet 5 等目前模型上已移除，送出會 400
+    assert "temperature" not in captured[0]
+    assert "top_p" not in captured[0]
+    assert "top_k" not in captured[0]
+    # thinking token 也計入 max_tokens，太小會在寫完報告前就被截斷
+    assert captured[0]["max_tokens"] >= 8000
+
+
+def test_analyze_skips_thinking_block_when_reading_text(monkeypatch):
+    """回應第一個 block 是 ThinkingBlock，直接取 content[0].text 會 AttributeError。"""
+    captured = []
+    monkeypatch.setattr(
+        lookup.anthropic, "Anthropic",
+        lambda api_key: _FakeAnthropicClient(api_key, "\n".join(lookup.REQUIRED_SECTIONS), captured),
+    )
+    result = lookup.analyze_with_llm("1.2.3.4", None, None, "fake-key", "claude-sonnet-5")
+    assert result["content"].startswith("一、基本資料摘要")
+    assert "（思考內容）" not in result["content"]
+
+
+def test_analyze_marks_truncated_response(monkeypatch):
+    class _TruncatedMessages(_FakeMessages):
+        def create(self, **kwargs):
+            self._captured.append(kwargs)
+            return _FakeMessage(self._text, stop_reason="max_tokens")
+
+    class _Client:
+        def __init__(self, api_key):
+            self.messages = _TruncatedMessages("\n".join(lookup.REQUIRED_SECTIONS), [])
+
+    monkeypatch.setattr(lookup.anthropic, "Anthropic", lambda api_key: _Client(api_key))
+    result = lookup.analyze_with_llm("1.2.3.4", None, None, "fake-key", "claude-sonnet-5")
+    assert "被截斷" in result["content"]
+
+
+def test_analyze_reports_model_refusal(monkeypatch):
+    class _Refused(_FakeMessage):
+        def __init__(self):
+            super().__init__("", stop_reason="refusal")
+            self.stop_details = type("D", (), {"category": "cyber"})()
+
+    class _Messages:
+        def create(self, **kwargs):
+            return _Refused()
+
+    class _Client:
+        def __init__(self, api_key):
+            self.messages = _Messages()
+
+    monkeypatch.setattr(lookup.anthropic, "Anthropic", lambda api_key: _Client(api_key))
+    with pytest.raises(lookup.LlmQueryError) as excinfo:
+        lookup.analyze_with_llm("1.2.3.4", None, None, "fake-key", "claude-sonnet-5")
+    assert excinfo.value.status_code == 403
+    assert "cyber" in str(excinfo.value)
 
 
 def test_system_prompt_instructs_treating_user_data_as_non_instructional():

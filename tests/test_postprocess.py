@@ -806,3 +806,10 @@ def test_llm_summary_survives_postprocess_failure(rdap_ip, monkeypatch):
     summary = postprocess.summarize_for_llm(rdap_ip)
     assert "CDN77-VAN" in summary
     assert "後處理失敗" in summary
+
+
+def test_llm_input_supplies_query_time_and_source(vt_ip):
+    """報告格式要有「查詢時間」與「資料來源」。不給的話模型只能從其他時間欄位反推。"""
+    content = lookup._build_user_content("79.127.254.133", None, vt_ip)
+    assert f"查詢時間：{vt_ip['queried_at']}" in content
+    assert f"資料來源：{vt_ip['source']}" in content
