@@ -538,6 +538,21 @@
 
   let lastAnalysisResult = null;
 
+  // 用量顯示出來才看得出一次分析實際花多少；重試時是兩次呼叫的總和
+  function formatUsage(usage) {
+    if (!usage || !usage.input_tokens) return '';
+    const parts = [`輸入 ${usage.input_tokens.toLocaleString()}`,
+                   `輸出 ${(usage.output_tokens || 0).toLocaleString()}`];
+    if (usage.cache_read_input_tokens) {
+      parts.push(`快取命中 ${usage.cache_read_input_tokens.toLocaleString()}`);
+    }
+    if (usage.cache_creation_input_tokens) {
+      parts.push(`寫入快取 ${usage.cache_creation_input_tokens.toLocaleString()}`);
+    }
+    if (usage.calls > 1) parts.push(`呼叫 ${usage.calls} 次（格式不符已重試）`);
+    return `<div><span class="field-label">Token 用量</span>${escapeHtml(parts.join('／'))}</div>`;
+  }
+
   function renderAnalysis(result) {
     lastAnalysisResult = result;
     const panel = document.getElementById('iplookup-panel-analysis');
@@ -546,6 +561,7 @@
         <div><span class="field-label">分析日期時間</span>${escapeHtml(result.analyzed_at)}</div>
         <div><span class="field-label">分析對象</span>${escapeHtml(result.target)}</div>
         <div><span class="field-label">分析使用的廠牌與模型</span>Anthropic — ${escapeHtml(result.model)}</div>
+        ${formatUsage(result.usage)}
       </div>
       <div class="iplookup-disclaimer">本分析僅供參考，非最終判斷，請自行核實原始資料</div>
       <div class="iplookup-analysis-content">${markdownToHtml(result.content)}</div>
@@ -710,6 +726,9 @@
       `分析日期時間：${lastAnalysisResult.analyzed_at}`,
       `分析對象：${lastAnalysisResult.target}`,
       `分析使用的廠牌與模型：Anthropic — ${lastAnalysisResult.model}`,
+      lastAnalysisResult.usage && lastAnalysisResult.usage.input_tokens
+        ? `Token 用量：輸入 ${lastAnalysisResult.usage.input_tokens}／輸出 ${lastAnalysisResult.usage.output_tokens || 0}`
+        : '',
       '',
       lastAnalysisResult.content,
     ];

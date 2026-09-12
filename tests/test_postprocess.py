@@ -817,7 +817,9 @@ def test_analyze_sends_annotations_via_system_parameter(rdap_ip, vt_ip, monkeypa
     class _Messages:
         def create(self, **kwargs):
             captured.append(kwargs)
-            return _StubMessage("\n".join(lookup.REQUIRED_SECTIONS))
+            body = "內容" * 20
+            return _StubMessage(
+                "\n\n".join(f"{sec}\n{body}" for sec in lookup.REQUIRED_SECTIONS))
 
     class _Client:
         def __init__(self, api_key):
@@ -826,8 +828,13 @@ def test_analyze_sends_annotations_via_system_parameter(rdap_ip, vt_ip, monkeypa
     monkeypatch.setattr(lookup.anthropic, "Anthropic", lambda api_key: _Client(api_key))
     lookup.analyze_with_llm("79.127.254.133", rdap_ip, vt_ip, "fake-key", "claude-sonnet-5")
     sent = captured[0]
-    assert "上層委派" in sent["system"]
-    assert lookup.SYSTEM_NOTES_HEADER in sent["system"]
+    # system 是 block 陣列：[0] 是帶快取標記的穩定前綴，標註在其後（會變動，不可進快取前綴）
+    assert sent["system"][0]["text"] == lookup.SYSTEM_PROMPT
+    assert sent["system"][0]["cache_control"] == {"type": "ephemeral"}
+    notes_block = sent["system"][1]["text"]
+    assert "上層委派" in notes_block
+    assert lookup.SYSTEM_NOTES_HEADER in notes_block
+    assert "cache_control" not in sent["system"][1]
     assert lookup.SYSTEM_NOTES_HEADER not in sent["messages"][0]["content"]
 
 

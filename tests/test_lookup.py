@@ -176,6 +176,11 @@ def test_query_virustotal_rate_limited_raises_with_status(monkeypatch):
     assert "429" in str(exc_info.value)
 
 
+def _report_with_sections(sections=None, body="內容" * 20) -> str:
+    """組一份最小但合格的報告：四章齊全、順序正確、每章都有內容。"""
+    return "\n\n".join(f"{section}\n{body}" for section in (sections or lookup.REQUIRED_SECTIONS))
+
+
 class _FakeContentBlock:
     def __init__(self, text):
         self.type = "text"
@@ -219,7 +224,7 @@ def test_analyze_with_llm_builds_prompt_and_returns_metadata(monkeypatch):
         lookup.anthropic, "Anthropic",
         lambda api_key: _FakeAnthropicClient(
             api_key,
-            "一、基本資料摘要\n【日誌總數：0】→ 無明顯活動紀錄\n二、可疑或具風險屬性\n三、中性／補充資訊\n四、資料缺口與限制",
+            _report_with_sections(),
             captured,
         ),
     )
@@ -232,7 +237,10 @@ def test_analyze_with_llm_builds_prompt_and_returns_metadata(monkeypatch):
     assert "analyzed_at" in result
     assert len(captured) == 1
     assert captured[0]["model"] == "claude-sonnet-5"
-    assert captured[0]["system"] == lookup.SYSTEM_PROMPT
+    # system 是 block 陣列：第一塊是穩定的 SYSTEM_PROMPT 並帶快取標記
+    blocks = captured[0]["system"]
+    assert blocks[0]["text"] == lookup.SYSTEM_PROMPT
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
     # temperature / top_p / top_k 在 Sonnet 5 等目前模型上已移除，送出會 400
     assert "temperature" not in captured[0]
     assert "top_p" not in captured[0]
@@ -246,7 +254,7 @@ def test_analyze_skips_thinking_block_when_reading_text(monkeypatch):
     captured = []
     monkeypatch.setattr(
         lookup.anthropic, "Anthropic",
-        lambda api_key: _FakeAnthropicClient(api_key, "\n".join(lookup.REQUIRED_SECTIONS), captured),
+        lambda api_key: _FakeAnthropicClient(api_key, _report_with_sections(), captured),
     )
     result = lookup.analyze_with_llm("1.2.3.4", None, None, "fake-key", "claude-sonnet-5")
     assert result["content"].startswith("一、基本資料摘要")
@@ -261,7 +269,7 @@ def test_analyze_marks_truncated_response(monkeypatch):
 
     class _Client:
         def __init__(self, api_key):
-            self.messages = _TruncatedMessages("\n".join(lookup.REQUIRED_SECTIONS), [])
+            self.messages = _TruncatedMessages(_report_with_sections(), [])
 
     monkeypatch.setattr(lookup.anthropic, "Anthropic", lambda api_key: _Client(api_key))
     result = lookup.analyze_with_llm("1.2.3.4", None, None, "fake-key", "claude-sonnet-5")
@@ -328,14 +336,31 @@ def test_flatten_for_llm_handles_nested_lists_and_none():
     assert flat["network.asn.org"] == "Example Org"
 
 
-def test_is_well_formed_true_when_all_sections_present():
-    content = "一、基本資料摘要\n二、可疑或具風險屬性\n三、中性／補充資訊\n四、資料缺口與限制"
+def test_is_well_formed_false_when_sections_are_empty():
+    """只檢查標題在不在的話，模型吐出四個空標題也會被判為合格。"""
+    assert lookup._is_well_formed("\n".join(lookup.REQUIRED_SECTIONS)) is False
+
+
+def test_is_well_formed_ignores_cross_references_in_prose():
+    """實測模型會在開頭寫「詳見『四、資料缺口與限制』」。用單純字串搜尋的話，
+    第四章的位置會早於第一章而被誤判成順序錯亂，白白觸發一次重試（成本翻倍）。"""
+    content = "**資料來源**：…詳見「四、資料缺口與限制」\n\n" + _report_with_sections()
     assert lookup._is_well_formed(content) is True
 
 
+def test_is_well_formed_false_when_sections_out_of_order():
+    scrambled = [lookup.REQUIRED_SECTIONS[1], lookup.REQUIRED_SECTIONS[0],
+                 lookup.REQUIRED_SECTIONS[2], lookup.REQUIRED_SECTIONS[3]]
+    assert lookup._is_well_formed(_report_with_sections(scrambled)) is False
+
+
+def test_is_well_formed_true_when_all_sections_present():
+    assert lookup._is_well_formed(_report_with_sections()) is True
+
+
 def test_is_well_formed_false_when_section_missing():
-    content = "一、基本資料摘要\n二、可疑或具風險屬性\n三、中性／補充資訊"
-    assert lookup._is_well_formed(content) is False
+    assert lookup._is_well_formed(
+        _report_with_sections(lookup.REQUIRED_SECTIONS[:3])) is False
 
 
 class _FakeMessagesSequence:
@@ -353,8 +378,8 @@ class _FakeAnthropicClientSequence:
         self.messages = _FakeMessagesSequence(texts, captured)
 
 
-_WELL_FORMED_CONTENT = "一、基本資料摘要\n二、可疑或具風險屬性\n三、中性／補充資訊\n四、資料缺口與限制"
-_MALFORMED_CONTENT = "一、基本資料摘要\n二、可疑或具風險屬性"
+_WELL_FORMED_CONTENT = _report_with_sections()
+_MALFORMED_CONTENT = _report_with_sections(lookup.REQUIRED_SECTIONS[:2])
 
 
 def test_analyze_with_llm_retries_once_on_malformed_output(monkeypatch):

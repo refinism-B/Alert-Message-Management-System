@@ -82,3 +82,5 @@ class AnalyzeResponse(BaseModel):
     analyzed_at: str
     target: str
     model: str
+    # token 用量。重試時是兩次呼叫的總和，calls 記錄實際呼叫次數。
+    usage: dict = {}

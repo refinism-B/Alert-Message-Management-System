@@ -271,8 +271,44 @@ SYSTEM_PROMPT = f"""# 角色設定
 REQUIRED_SECTIONS = ["一、基本資料摘要", "二、可疑或具風險屬性", "三、中性／補充資訊", "四、資料缺口與限制"]
 
 
+# 各章至少要有這麼多非空白字元才算有內容。只檢查標題字串在不在的話，
+# 模型吐出四個空標題也會被判為合格。
+_MIN_SECTION_CHARS = 20
+
+
+def _section_offsets(content: str) -> Optional[list[int]]:
+    """找出各章標題在文中的位置。找不到任何一章就回 None。
+
+    只認「行首的標題」（可帶 Markdown 的 # 前綴），不認行內的交叉引用。
+    實測模型會在開頭寫「詳見『四、資料缺口與限制』」，若用單純的字串搜尋，
+    第四章的位置會早於第一章而被誤判成順序錯亂，白白觸發一次重試。
+    """
+    offsets: list[int] = []
+    for section in REQUIRED_SECTIONS:
+        found = None
+        cursor = 0
+        for line in content.splitlines(keepends=True):
+            if re.match(r"\s*#{0,6}\s*" + re.escape(section), line):
+                found = cursor
+                break
+            cursor += len(line)
+        if found is None:
+            return None
+        offsets.append(found)
+    return offsets
+
+
 def _is_well_formed(content: str) -> bool:
-    return all(section in content for section in REQUIRED_SECTIONS)
+    """檢查報告是否符合固定格式：四章齊全、順序正確、每章都有內容。"""
+    offsets = _section_offsets(content)
+    if offsets is None or offsets != sorted(offsets):
+        return False
+    bounds = offsets[1:] + [len(content)]
+    for section, start, end in zip(REQUIRED_SECTIONS, offsets, bounds):
+        body = content[start:end].split(section, 1)[-1]
+        if len(body.strip()) < _MIN_SECTION_CHARS:
+            return False
+    return True
 
 
 def _flatten_for_llm(data: dict, prefix: str = "") -> dict:
@@ -372,7 +408,7 @@ def _build_user_content(target: str, rdap: Optional[dict], vt: Optional[dict]) -
 
 
 def _build_system_prompt(rdap: Optional[dict], vt: Optional[dict]) -> str:
-    """系統提示詞 + 本次查詢的系統標註。
+    """系統提示詞 + 本次查詢的系統標註（單一字串版，供測試與除錯檢視）。
 
     標註走 system 參數而非使用者訊息，因為那是唯一真正有權限的通道——
     使用者訊息裡的任何文字都可能是被查詢對象自己填的。
@@ -382,6 +418,42 @@ def _build_system_prompt(rdap: Optional[dict], vt: Optional[dict]) -> str:
         return SYSTEM_PROMPT
     body = "\n".join(f"- {n}" for n in notes)
     return f"{SYSTEM_PROMPT}\n\n{SYSTEM_NOTES_HEADER}\n{body}"
+
+
+def _build_system_blocks(rdap: Optional[dict], vt: Optional[dict]) -> list[dict]:
+    """把 system 拆成「穩定前綴 + 本次標註」兩塊，前綴開快取。
+
+    快取是前綴比對，任何一個位元組變動都會讓後面全部失效，所以每次都不同的
+    標註必須放在 cache_control 斷點之後。SYSTEM_PROMPT 實測約 2,588 tokens，
+    高於 claude-sonnet-5 的 1,024 門檻，才值得開；低於門檻的話不會報錯，
+    但也不會真的快取（cache_creation_input_tokens 會是 0）。
+    """
+    blocks: list[dict] = [{
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    notes = _system_notes(rdap, vt)
+    if notes:
+        body = "\n".join(f"- {n}" for n in notes)
+        blocks.append({"type": "text", "text": f"{SYSTEM_NOTES_HEADER}\n{body}"})
+    return blocks
+
+
+_USAGE_FIELDS = ("input_tokens", "output_tokens",
+                 "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def _accumulate_usage(total: dict, message) -> None:
+    """把每次呼叫的 token 用量累加起來。重試時會呼叫兩次，只記後面那次會低報。"""
+    usage = getattr(message, "usage", None)
+    if usage is None:
+        return
+    for field in _USAGE_FIELDS:
+        value = getattr(usage, field, None)
+        if isinstance(value, int):
+            total[field] = total.get(field, 0) + value
+    total["calls"] = total.get("calls", 0) + 1
 
 
 def _extract_text(message) -> str:
@@ -405,6 +477,7 @@ def _extract_text(message) -> str:
 
 def analyze_with_llm(target: str, rdap: Optional[dict], vt: Optional[dict], api_key: str, model: str) -> dict:
     client = anthropic.Anthropic(api_key=api_key)
+    usage: dict = {}
     create_kwargs = dict(
         model=model,
         # Claude Sonnet 5 起 thinking token 也計入 max_tokens，1024 會在還沒寫完
@@ -412,14 +485,16 @@ def analyze_with_llm(target: str, rdap: Optional[dict], vt: Optional[dict], api_
         max_tokens=16000,
         # temperature / top_p / top_k 在 Sonnet 5、Opus 5 等模型上已被移除，
         # 送出會直接 400 `temperature is deprecated for this model`。
-        system=_build_system_prompt(rdap, vt),
+        system=_build_system_blocks(rdap, vt),
         messages=[{"role": "user", "content": f"【使用者提供資料】\n{_build_user_content(target, rdap, vt)}"}],
     )
     try:
         message = client.messages.create(**create_kwargs)
+        _accumulate_usage(usage, message)
         content = _extract_text(message)
         if not _is_well_formed(content):
             message = client.messages.create(**create_kwargs)
+            _accumulate_usage(usage, message)
             content = _extract_text(message)
             if not _is_well_formed(content):
                 content = f"⚠️ 本次分析輸出未完全符合固定格式，以下為原始回應內容：\n\n{content}"
@@ -427,4 +502,5 @@ def analyze_with_llm(target: str, rdap: Optional[dict], vt: Optional[dict], api_
         raise LlmQueryError(e.status_code, f"LLM 進階分析失敗：{e.status_code} {e.message}") from e
     except anthropic.APIConnectionError as e:
         raise LlmQueryError(503, "LLM 進階分析失敗：無法連線至 Anthropic API") from e
-    return {"content": content, "analyzed_at": _now_tw(), "target": target, "model": model}
+    return {"content": content, "analyzed_at": _now_tw(), "target": target,
+            "model": model, "usage": usage}
