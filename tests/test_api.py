@@ -11,7 +11,8 @@ def tmp_db(tmp_path, monkeypatch):
 @pytest.fixture
 def client():
     from main import app
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 def test_get_schema(client):
     r = client.get("/api/schema")
@@ -21,9 +22,9 @@ def test_get_schema(client):
     assert "Offense ID" in data["fields"]
 
 def test_put_schema(client):
-    r = client.put("/api/schema", json={"fields": ["欄位A", "欄位B"]})
+    r = client.put("/api/schema", json={"fields": ["Offense ID", "欄位A", "欄位B"]})
     assert r.status_code == 200
-    assert r.json()["fields"] == ["欄位A", "欄位B"]
+    assert r.json()["fields"] == ["Offense ID", "欄位A", "欄位B"]
 
 def test_get_schema_waf_template(client):
     r = client.get("/api/schema?template=waf")
@@ -33,11 +34,11 @@ def test_get_schema_waf_template(client):
     assert "response code" in fields
 
 def test_put_schema_waf_template_does_not_affect_general(client):
-    r = client.put("/api/schema?template=waf", json={"fields": ["A", "B"]})
+    r = client.put("/api/schema?template=waf", json={"fields": ["Offense ID", "A", "B"]})
     assert r.status_code == 200
-    assert r.json()["fields"] == ["A", "B"]
+    assert r.json()["fields"] == ["Offense ID", "A", "B"]
     general = client.get("/api/schema").json()
-    assert general["fields"] != ["A", "B"]
+    assert general["fields"] != ["Offense ID", "A", "B"]
 
 def test_get_schema_invalid_template_rejected(client):
     r = client.get("/api/schema?template=bogus")

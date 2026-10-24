@@ -6,6 +6,7 @@
       <input id="iplookup-input" type="text" placeholder="輸入 IP 或網域...">
       <button id="iplookup-query-btn" class="btn btn-primary" onclick="ipLookupQuery()">查詢</button>
       <button id="iplookup-analyze-btn" class="btn btn-secondary" disabled onclick="ipLookupAnalyze()">進階分析</button>
+      <button id="iplookup-settings-btn" class="btn btn-secondary iplookup-settings-btn" onclick="openSettings()">⚙ 設定</button>
     </div>
     <div class="iplookup-tabs">
       <button class="iplookup-tab-btn active" data-tab="rdap" onclick="ipLookupSwitchTab('rdap')">RDAP／WHOIS</button>
@@ -25,6 +26,20 @@
   let vtDone = false;
   let lastQueryTarget = null;
   let lastCompareResult = null;
+  // 每次新查詢遞增；非同步回應回來時與發出時的值不同，代表畫面已換成別的查詢，須丟棄
+  let queryGen = 0;
+
+  document.getElementById('iplookup-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !document.getElementById('iplookup-query-btn').disabled) {
+      window.ipLookupQuery();
+    }
+  });
+
+  // FastAPI 的 422 detail 是物件陣列，直接插值會變成 [object Object]
+  function errorDetail(err) {
+    const d = err && err.detail;
+    return typeof d === 'string' ? d : JSON.stringify(d ?? '');
+  }
 
   window.ipLookupSwitchTab = function (tab) {
     document.querySelectorAll('.iplookup-tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
@@ -247,9 +262,9 @@
                       ['無害', stats.harmless, 'tone-ok'], ['未偵測', stats.undetected, ''],
                       ['逾時', stats.timeout, '']];
     const chips = chipDefs.filter(([, v]) => v !== undefined && v !== null)
-      .map(([k, v, c]) => `<span class="iplookup-chip ${c}">${k} ${v}</span>`).join('');
+      .map(([k, v, c]) => `<span class="iplookup-chip ${c}">${k} ${escapeHtml(v)}</span>`).join('');
     let body = `<div class="iplookup-chips">${chips}` +
-               `<span class="iplookup-chip">共 ${engines.total} 家引擎</span></div>`;
+               `<span class="iplookup-chip">共 ${escapeHtml(engines.total)} 家引擎</span></div>`;
     if (engines.mismatch) {
       body += `<div class="iplookup-callout tone-warn">${escapeHtml(engines.mismatch)}</div>`;
     }
@@ -276,7 +291,7 @@
     let out = '';
     const constants = Object.entries(table.constant || {});
     if (constants.length) {
-      out += `<div class="iplookup-note">以下 ${count} 筆的這些欄位值全部相同：` +
+      out += `<div class="iplookup-note">以下 ${escapeHtml(count)} 筆的這些欄位值全部相同：` +
         constants.map(([k, v]) => `<code>${escapeHtml(k)}</code> = ${escapeHtml(valueText(v))}`).join('、') + '</div>';
     }
     if (table.empty_columns && table.empty_columns.length) {
@@ -305,8 +320,8 @@
   function renderHidden(hidden) {
     if (!hidden || !hidden.count) return '';
     const rows = hidden.fields.map((f) => ({ label: f.label, path: f.path, value: `（${f.reason}）` }));
-    return `<details class="iplookup-section"><summary>已隱藏 ${hidden.count} 個欄位` +
-           `（其中 ${hidden.empty_count} 個為空值）</summary>` +
+    return `<details class="iplookup-section"><summary>已隱藏 ${escapeHtml(hidden.count)} 個欄位` +
+           `（其中 ${escapeHtml(hidden.empty_count)} 個為空值）</summary>` +
            '<div class="iplookup-note">「欄位存在但未填寫」與「來源根本沒有這個欄位」的判讀意義不同，' +
            '因此空欄位只收合、不刪除。</div>' + renderFieldRows(rows) + '</details>';
   }
@@ -314,13 +329,24 @@
   function renderRaw(data) {
     const flat = flattenForDisplay(data);
     const rows = Object.entries(flat).map(([k, v]) => ({ label: k, path: k, value: v }));
-    return `<details class="iplookup-section"><summary>檢視原始資料（${rows.length} 個欄位）</summary>` +
-           '<div class="iplookup-note">未經任何摘要或摺疊處理的完整回應內容。</div>' +
-           renderFieldRows(rows) + '</details>';
+    // 預設收合，數百列的 HTML 等第一次展開才建（見 renderLookupResult 掛的 toggle 監聽）
+    return {
+      html: `<details class="iplookup-section iplookup-raw"><summary>檢視原始資料（${rows.length} 個欄位）</summary>` +
+            '<div class="iplookup-note">未經任何摘要或摺疊處理的完整回應內容。</div></details>',
+      fill: (details) => details.insertAdjacentHTML('beforeend', renderFieldRows(rows)),
+    };
   }
 
   function renderLookupError(tab, message) {
     document.getElementById(`iplookup-panel-${tab}`).innerHTML = `<div class="iplookup-error">${escapeHtml(message)}</div>`;
+  }
+
+  // VT 結果可能來自伺服端 6 小時快取；cached_at 是 ISO 8601，queried_at 仍是原始取得時間
+  function cacheNote(result) {
+    if (!result.cached) return '';
+    const minutes = Math.round((Date.now() - Date.parse(result.cached_at)) / 60000);
+    const age = Number.isFinite(minutes) ? `${Math.max(0, minutes)} 分鐘前取得` : '取得時間不明';
+    return `<div><span class="field-label">資料狀態</span>快取（${escapeHtml(age)}）</div>`;
   }
 
   function renderLookupResult(tab, result) {
@@ -329,15 +355,18 @@
       <div class="iplookup-meta">
         <div><span class="field-label">資料來源</span>${escapeHtml(result.source)}</div>
         <div><span class="field-label">查詢日期時間</span>${escapeHtml(result.queried_at)}</div>
+        ${cacheNote(result)}
       </div>`;
     const warnings = (result.warnings || [])
       .map((w) => `<div class="iplookup-callout tone-warn">${escapeHtml(w)}</div>`).join('');
     let body;
+    let raw = null;
     if (result.view) {
+      raw = renderRaw(result.data);
       body = renderSummary(result.view.summary) +
              (result.view.sections || []).map(renderSection).join('') +
              renderHidden(result.view.hidden) +
-             renderRaw(result.data);
+             raw.html;
     } else {
       // 後端未提供 view（舊版或後處理停用）時退回原本的全欄位攤平呈現
       body = renderFieldRows(Object.entries(flattenForDisplay(result.data))
@@ -349,6 +378,10 @@
         <button class="btn btn-secondary btn-sm" onclick="ipLookupExportCsv('${tab}')">匯出 CSV（完整）</button>
       </div>`;
     panel.innerHTML = meta + warnings + body + exportBtns;
+    if (raw) {
+      const details = panel.querySelector('.iplookup-raw');
+      details.addEventListener('toggle', () => raw.fill(details), { once: true });
+    }
   }
 
   const COMPARE_STATUS = {
@@ -410,11 +443,12 @@
       '<button class="btn btn-secondary btn-sm" onclick="ipLookupExportCompareTxt()">匯出 TXT</button></div>';
   }
 
-  async function fetchCompare() {
+  async function fetchCompare(gen) {
     const panel = document.getElementById('iplookup-panel-compare');
     const btn = document.getElementById('iplookup-tab-btn-compare');
     if (!lastRdapResult && !lastVtResult) {
       panel.innerHTML = '<div class="iplookup-empty">RDAP 與 VirusTotal 皆未取得資料，無法比對</div>';
+      btn.disabled = false;  // 分頁鈕不開的話，使用者看不到這則說明
       return;
     }
     panel.innerHTML = '<div class="iplookup-loading">比對中...</div>';
@@ -426,13 +460,19 @@
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        panel.innerHTML = `<div class="iplookup-error">來源比對失敗：${res.status} ${escapeHtml(err.detail || '')}</div>`;
+        if (gen !== queryGen) return;
+        panel.innerHTML = `<div class="iplookup-error">來源比對失敗：${res.status} ${escapeHtml(errorDetail(err))}</div>`;
+        btn.disabled = false;
         return;
       }
-      renderCompare(await res.json());
+      const result = await res.json();
+      if (gen !== queryGen) return;
+      renderCompare(result);
       btn.disabled = false;
     } catch (e) {
+      if (gen !== queryGen) return;
       panel.innerHTML = `<div class="iplookup-error">來源比對失敗：${escapeHtml(e.message)}</div>`;
+      btn.disabled = false;
     }
   }
 
@@ -464,50 +504,63 @@
     document.getElementById('iplookup-query-btn').disabled = disabled;
   }
 
-  function checkQueryComplete() {
+  function checkQueryComplete(gen) {
+    if (gen !== queryGen) return;
     if (rdapDone && vtDone) {
       setQueryButtonDisabled(false);
       if (lastRdapResult || lastVtResult) {
         document.getElementById('iplookup-analyze-btn').disabled = false;
       }
       // 跨來源比對需要兩邊的結果，只能等兩個查詢都結束才發動
-      fetchCompare();
+      fetchCompare(gen);
     }
   }
 
-  async function fetchRdap(target) {
+  async function fetchRdap(target, gen) {
     try {
       const res = await fetch(`/api/lookup/rdap?target=${encodeURIComponent(target)}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        renderLookupError('rdap', `RDAP/WHOIS 查詢失敗：${res.status} ${err.detail || ''}`);
+        if (gen !== queryGen) return;
+        renderLookupError('rdap', `RDAP/WHOIS 查詢失敗：${res.status} ${errorDetail(err)}`);
       } else {
-        lastRdapResult = await res.json();
+        const data = await res.json();
+        if (gen !== queryGen) return;
+        lastRdapResult = data;
         renderLookupResult('rdap', lastRdapResult);
       }
     } catch (e) {
+      if (gen !== queryGen) return;
       renderLookupError('rdap', `RDAP/WHOIS 查詢失敗：${e.message}`);
     } finally {
-      rdapDone = true;
-      checkQueryComplete();
+      if (gen === queryGen) {
+        rdapDone = true;
+        checkQueryComplete(gen);
+      }
     }
   }
 
-  async function fetchVt(target) {
+  async function fetchVt(target, gen) {
     try {
       const res = await fetch(`/api/lookup/vt?target=${encodeURIComponent(target)}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        renderLookupError('vt', `VirusTotal 查詢失敗：${res.status} ${err.detail || ''}`);
+        if (gen !== queryGen) return;
+        renderLookupError('vt', `VirusTotal 查詢失敗：${res.status} ${errorDetail(err)}`);
       } else {
-        lastVtResult = await res.json();
+        const data = await res.json();
+        if (gen !== queryGen) return;
+        lastVtResult = data;
         renderLookupResult('vt', lastVtResult);
       }
     } catch (e) {
+      if (gen !== queryGen) return;
       renderLookupError('vt', `VirusTotal 查詢失敗：${e.message}`);
     } finally {
-      vtDone = true;
-      checkQueryComplete();
+      if (gen === queryGen) {
+        vtDone = true;
+        checkQueryComplete(gen);
+      }
     }
   }
 
@@ -517,6 +570,7 @@
       showToast('請輸入查詢目標', 'error');
       return;
     }
+    const gen = ++queryGen;
     lastRdapResult = null;
     lastVtResult = null;
     rdapDone = false;
@@ -532,8 +586,8 @@
     document.getElementById('iplookup-panel-rdap').innerHTML = '<div class="iplookup-loading">查詢中...</div>';
     document.getElementById('iplookup-panel-vt').innerHTML = '<div class="iplookup-loading">查詢中...</div>';
 
-    fetchRdap(target);
-    fetchVt(target);
+    fetchRdap(target, gen);
+    fetchVt(target, gen);
   };
 
   let lastAnalysisResult = null;
@@ -572,9 +626,21 @@
 
   window.ipLookupAnalyze = async function () {
     const target = lastQueryTarget;
+    const gen = queryGen;
     const btn = document.getElementById('iplookup-analyze-btn');
     btn.disabled = true;
-    document.getElementById('iplookup-panel-analysis').innerHTML = '<div class="iplookup-loading">分析中...</div>';
+    btn.textContent = '分析中...';
+    // 分析要數十秒；先切到分頁顯示進度，否則畫面毫無變化，使用者會以為沒送出而重複點擊
+    const panel = document.getElementById('iplookup-panel-analysis');
+    panel.innerHTML = '<div class="iplookup-loading iplookup-loading-analysis">分析中，0 秒（請勿重複點擊查詢）</div>';
+    const loading = panel.firstElementChild;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      loading.textContent = `分析中，${secs} 秒（請勿重複點擊查詢）`;
+    }, 1000);
+    document.getElementById('iplookup-tab-btn-analysis').disabled = false;
+    ipLookupSwitchTab('analysis');
     try {
       const res = await fetch('/api/lookup/analyze', {
         method: 'POST',
@@ -585,32 +651,40 @@
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        if (gen !== queryGen) return;
         document.getElementById('iplookup-panel-analysis').innerHTML =
-          `<div class="iplookup-error">進階分析失敗：${res.status} ${escapeHtml(err.detail || '')}</div>`;
+          `<div class="iplookup-error">進階分析失敗：${res.status} ${escapeHtml(errorDetail(err))}</div>`;
         document.getElementById('iplookup-tab-btn-analysis').disabled = false;
         ipLookupSwitchTab('analysis');
         return;
       }
       const result = await res.json();
+      if (gen !== queryGen) return;
       renderAnalysis(result);
       document.getElementById('iplookup-tab-btn-analysis').disabled = false;
       ipLookupSwitchTab('analysis');
     } catch (e) {
+      if (gen !== queryGen) return;
       document.getElementById('iplookup-panel-analysis').innerHTML =
         `<div class="iplookup-error">進階分析失敗：${escapeHtml(e.message)}</div>`;
       document.getElementById('iplookup-tab-btn-analysis').disabled = false;
       ipLookupSwitchTab('analysis');
     } finally {
-      btn.disabled = false;
+      clearInterval(timer);
+      btn.textContent = '進階分析';
+      // 新查詢已把按鈕交給 checkQueryComplete 管理，過期的分析不能擅自重新啟用
+      if (gen === queryGen) btn.disabled = false;
     }
   };
 
   function csvEscape(value) {
     const s = String(value ?? '');
-    if (/[",\n]/.test(s)) {
-      return '"' + s.replace(/"/g, '""') + '"';
+    // 值來自攻擊者可控的 WHOIS/VT 內容；Excel 會把開頭為 = + - @ Tab CR 的儲存格當公式求值
+    const guarded = /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+    if (/[",\r\n]/.test(guarded)) {
+      return '"' + guarded.replace(/"/g, '""') + '"';
     }
-    return s;
+    return guarded;
   }
 
   function downloadBlob(filename, content, mime) {
@@ -622,7 +696,7 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);  // 立刻 revoke 會讓部分瀏覽器下載失敗
   }
 
   function resultForTab(tab) {

@@ -39,8 +39,6 @@ _VT_EPOCH_FIELDS = {
     "not_after", "not_before",
 }
 
-_EMPTY_VALUES = (None, "", [], {})
-
 
 # ---------------------------------------------------------------------------
 # 攤平
@@ -261,7 +259,6 @@ class ViewBuilder:
         self.sections: list[dict] = []
         self.hidden_fields: list[dict] = []
         self.warnings: list[str] = []
-        self.unknown_fields: list[str] = []
         self.consumed: set[str] = set()
 
     # -- summary ------------------------------------------------------------
@@ -333,7 +330,6 @@ class ViewBuilder:
             if is_empty(value):
                 self.hide(labeller(path), path, "空值")
                 continue
-            self.unknown_fields.append(path)
             rows.append({"label": labeller(path), "path": path, "value": to_text(value)})
         if rows:
             self.add_fields_section(
@@ -349,7 +345,6 @@ class ViewBuilder:
                 "empty_count": sum(1 for f in self.hidden_fields if f["reason"] == "空值"),
                 "fields": self.hidden_fields,
             },
-            "unknown_fields": self.unknown_fields,
         }
 
 
@@ -382,7 +377,6 @@ WHOISIT_LABELS = {
     "status": "狀態",
     "nameservers": "名稱伺服器",
     "dnssec": "DNSSEC",
-    "raw": "原始回應",
     "entities.*.handle": "聯絡人代碼",
     "entities.*.name": "聯絡人名稱",
     "entities.*.email": "聯絡人 Email",
@@ -494,9 +488,10 @@ VT_LABELS = {
 _RDAP_EXTENSION_RE = re.compile(r"(^|\.)[a-z][a-z0-9]*[0-9]_[a-z0-9_]+")
 
 # 法律／協定樣板欄位：內容每筆都不同且都不空，靠空值或恆定值判斷抓不出來，
-# 用欄位名白名單直接歸類。
-_LEGAL_KEYS = {"notices", "remarks", "copyright_notice", "terms_of_service_url",
-               "rdap_conformance", "lang", "object_class_name", "port43"}
+# 用欄位名白名單直接歸類。用 tuple 而非 set：set 的迭代順序隨字串 hash 隨機化，
+# 會讓區塊內的列順序每次啟動都不同。
+_LEGAL_KEYS = ("notices", "remarks", "copyright_notice", "terms_of_service_url",
+               "rdap_conformance", "lang", "object_class_name", "port43")
 
 
 def _label_from_dict(path: str, table: dict[str, str]) -> str:
@@ -518,16 +513,7 @@ def _label_from_dict(path: str, table: dict[str, str]) -> str:
 
 
 def make_labeller(table: dict[str, str]):
-    def labeller(path: str) -> str:
-        label = _label_from_dict(path, table)
-        return label if label != path else path
-    return labeller
-
-
-def label_with_path(path: str, table: dict[str, str]) -> dict:
-    """翻譯只加不取代：同時保留原始路徑，讓分析師能回頭核對原始資料
-    （lookup.py 的 SYSTEM_PROMPT 也要求 LLM 標註欄位路徑）。"""
-    return {"label": _label_from_dict(path, table), "path": path}
+    return lambda path: _label_from_dict(path, table)
 
 
 # ---------------------------------------------------------------------------
@@ -629,10 +615,12 @@ def _build_whoisit_view(result: dict, builder: ViewBuilder, now: Optional[dateti
         builder.add_summary(label, raw_value, path=key, text=described, tone=tone)
 
     if target_type != "ip":
+        _add_domain_age(builder, builder.get("registration_date"), "registration_date",
+                        "registration_date", now)
         nameservers = data.get("nameservers")
         builder.add_summary("DNSSEC", builder.get("dnssec"), path="dnssec")
         builder.add_summary(
-            "名稱伺服器", nameservers,
+            "名稱伺服器", nameservers, path="nameservers",
             text=f"{len(nameservers)} 台：{to_text(nameservers)}"
             if isinstance(nameservers, list) and nameservers else None)
         builder.consume_prefix("nameservers")
@@ -666,17 +654,6 @@ def _build_whoisit_view(result: dict, builder: ViewBuilder, now: Optional[dateti
     builder.add_fields_section("object_detail", "物件明細", detail_rows)
 
     _add_legal_section(builder, WHOISIT_LABELS, prefix="")
-
-    if not is_empty(data.get("raw")):
-        raw_paths = builder.consume_prefix("raw")
-        rows = []
-        for p in raw_paths:
-            if is_empty(builder.flat[p]):
-                builder.hide(_label_from_dict(p, WHOISIT_LABELS), p, "空值")
-                continue
-            rows.append({"label": _label_from_dict(p, WHOISIT_LABELS), "path": p,
-                         "value": to_text(builder.flat[p])})
-        builder.add_section("raw_rdap", "RDAP 原始回應", "fields", {"rows": rows}, collapsed=True)
 
 
 def _add_legal_section(builder: "ViewBuilder", table: dict[str, str], prefix: str) -> None:
@@ -722,6 +699,8 @@ def _build_pywhois_view(result: dict, builder: ViewBuilder, now: Optional[dateti
         described = describe_time(raw_value, key, is_expiry=is_expiry, now=now)
         tone = "risk" if (is_expiry and described and "已過期" in described) else None
         builder.add_summary(label, raw_value, path=key, text=described, tone=tone)
+    _add_domain_age(builder, (result.get("data") or {}).get("creation_date"), "creation_date",
+                    "creation_date", now)
     builder.add_summary("註冊人組織", builder.get("registrant_organization"),
                         path="registrant_organization")
     builder.add_summary("註冊人國家", builder.get("registrant_country"),
@@ -729,7 +708,7 @@ def _build_pywhois_view(result: dict, builder: ViewBuilder, now: Optional[dateti
 
     name_servers = (result.get("data") or {}).get("name_servers")
     builder.add_summary(
-        "名稱伺服器", name_servers,
+        "名稱伺服器", name_servers, path="name_servers",
         text=f"{len(name_servers)} 台：{to_text(name_servers)}"
         if isinstance(name_servers, list) and name_servers else None)
     builder.consume_prefix("name_servers")
@@ -759,6 +738,105 @@ _VT_ATTR = "data.attributes."
 
 # 這些 VT 欄位體積大、判讀價值低，直接歸到收合區塊；不靠空值/恆定值判斷。
 _VT_BULKY_KEYS = ("last_https_certificate",)
+
+# ASN → 託管類型的靜態對照表。只收錄歸屬確定的 ASN；不在表內就回 None，
+# 不代表任何判斷。雲端／CDN／主機代管本身不是惡意訊號，只作為補充事實呈現。
+# 表內容需定期由 SOC 檢視。
+ASN_HOSTING = {
+    16509: ("Amazon AWS", "雲端平台"),
+    14618: ("Amazon AWS", "雲端平台"),
+    15169: ("Google", "雲端平台"),
+    396982: ("Google Cloud", "雲端平台"),
+    8075: ("Microsoft", "雲端平台"),
+    31898: ("Oracle Cloud", "雲端平台"),
+    13335: ("Cloudflare", "CDN"),
+    60068: ("Datacamp／CDN77", "CDN／主機代管"),
+    14061: ("DigitalOcean", "VPS／主機代管"),
+    16276: ("OVH", "VPS／主機代管"),
+    24940: ("Hetzner", "VPS／主機代管"),
+    20473: ("Vultr", "VPS／主機代管"),
+    63949: ("Akamai／Linode", "VPS／主機代管"),
+    51167: ("Contabo", "VPS／主機代管"),
+    9009: ("M247", "VPS／主機代管"),
+}
+
+
+def classify_asn(asn: Any) -> Optional[dict]:
+    """查 ASN_HOSTING。asn 可能是 60068 或 "AS60068"；查不到回 None。"""
+    match = re.fullmatch(r"(?:as)?(\d{1,10})", to_text(asn).strip().lower())
+    if not match:
+        return None
+    entry = ASN_HOSTING.get(int(match.group(1)))
+    if entry is None:
+        return None
+    return {"asn": int(match.group(1)), "provider": entry[0], "hosting_class": entry[1]}
+
+
+# VT tags 分類。比對的是 tag 拆成的單字（"tor-exit-node" → tor），避免 "monitor"
+# 這類子字串誤中。VT 的實際字彙未見官方完整列舉，清單以實測樣本與常見用語為起點。
+TAG_ANONYMIZATION = "匿名化"
+TAG_ABUSE = "濫用"
+TAG_NEUTRAL = "中性"
+_TAG_TOKENS = (
+    (TAG_ANONYMIZATION, frozenset({"vpn", "tor", "proxy", "anonymizer", "anonymous"})),
+    (TAG_ABUSE, frozenset({"malware", "phishing", "botnet", "c2", "cnc", "spam", "scanner",
+                           "bruteforce", "exploit", "miner", "cryptominer", "ransomware",
+                           "malicious"})),
+)
+
+
+def classify_tags(tags: Any) -> dict[str, list[str]]:
+    """把 VT tags 分成匿名化／濫用／中性三類，回傳 {類別: [tag, ...]}（三類都在）。"""
+    out: dict[str, list[str]] = {TAG_ANONYMIZATION: [], TAG_ABUSE: [], TAG_NEUTRAL: []}
+    if not isinstance(tags, list):
+        return out
+    for tag in tags:
+        text = to_text(tag).strip()
+        if not text:
+            continue
+        tokens = set(re.split(r"[^a-z0-9]+", text.lower()))
+        for category, vocabulary in _TAG_TOKENS:
+            if tokens & vocabulary:
+                out[category].append(text)
+                break
+        else:
+            out[TAG_NEUTRAL].append(text)
+    return out
+
+
+def _describe_tag_classes(classes: dict[str, list[str]]) -> str:
+    return "；".join(f"{name}：{'、'.join(items) if items else '無'}"
+                     for name, items in classes.items())
+
+
+def _cert_summary_rows(cert: Any, now: Optional[datetime]) -> list[dict]:
+    """HTTPS 憑證只取五項判讀用的欄位：簽發者、主體 CN、SAN、生效與到期時間。
+    「簽發不到幾天」「SAN 夾帶大量不相干網域」「CN 與目標不符」都是常見的釣魚
+    或寄生網域訊號，整段略過會丟掉它們；原始欄位仍在收合區塊。"""
+    if not isinstance(cert, dict) or not cert:
+        return []
+    base = _VT_ATTR + "last_https_certificate."
+    rows = []
+    issuer = cert.get("issuer") if isinstance(cert.get("issuer"), dict) else {}
+    issuer_text = "／".join(to_text(issuer.get(k)) for k in ("O", "CN") if not is_empty(issuer.get(k)))
+    if issuer_text:
+        rows.append({"label": "簽發者（O／CN）", "path": base + "issuer", "value": issuer_text})
+    subject = cert.get("subject") if isinstance(cert.get("subject"), dict) else {}
+    if not is_empty(subject.get("CN")):
+        rows.append({"label": "主體 CN", "path": base + "subject.CN", "value": to_text(subject["CN"])})
+    extensions = cert.get("extensions") if isinstance(cert.get("extensions"), dict) else {}
+    san = extensions.get("subject_alternative_name")
+    if isinstance(san, list) and san:
+        shown = "、".join(to_text(s) for s in san[:10])
+        more = f"（另有 {len(san) - 10} 筆未列出）" if len(san) > 10 else ""
+        rows.append({"label": "SAN", "path": base + "extensions.subject_alternative_name",
+                     "value": f"{len(san)} 筆：{shown}{more}"})
+    validity = cert.get("validity") if isinstance(cert.get("validity"), dict) else {}
+    for label, key, is_expiry in (("生效時間", "not_before", False), ("到期時間", "not_after", True)):
+        described = describe_time(validity.get(key), key, is_expiry=is_expiry, now=now)
+        if described:
+            rows.append({"label": label, "path": base + "validity." + key, "value": described})
+    return rows
 
 
 def _vt_engine_summary(results: Any, stats: Any) -> dict:
@@ -833,6 +911,13 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
     if target_type == "ip":
         summarize("ASN 持有者", "as_owner")
         summarize("ASN", "asn")
+        if not is_empty(attr("asn")):
+            hosting = classify_asn(attr("asn"))
+            builder.add_summary(
+                "ASN 託管類型（系統衍生）", hosting, path=_VT_ATTR + "asn",
+                text=(f"{hosting['hosting_class']}（{hosting['provider']}）" if hosting
+                      else "未列於本系統的 ASN 對照表"),
+                note="依本系統的 ASN 靜態對照表判定；雲端、CDN 或主機代管本身不是風險訊號。")
         summarize("網段", "network")
         summarize("所屬 RIR", "regional_internet_registry")
     else:
@@ -873,16 +958,22 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
     votes = attributes.get("total_votes")
     builder.consume_prefix(_VT_ATTR + "total_votes")
     if isinstance(votes, dict):
-        builder.add_summary("社群投票", votes,
+        builder.add_summary("社群投票", votes, path=_VT_ATTR + "total_votes",
                             text=f"無害 {votes.get('harmless', 0)}／惡意 {votes.get('malicious', 0)}",
                             tone="warn" if int(votes.get("malicious") or 0) else None)
     else:
-        builder.add_summary("社群投票", None)
+        builder.add_summary("社群投票", None, path=_VT_ATTR + "total_votes")
 
     tags = attributes.get("tags")
     builder.consume_prefix(_VT_ATTR + "tags")
-    builder.add_summary("標籤", tags, text=to_text(tags) if tags else None,
+    builder.add_summary("標籤", tags, path=_VT_ATTR + "tags", text=to_text(tags) if tags else None,
                         tone="warn" if tags else None)
+    if isinstance(tags, list) and tags:
+        classes = classify_tags(tags)
+        builder.add_summary(
+            "標籤分類（系統衍生）", classes, path=_VT_ATTR + "tags",
+            text=_describe_tag_classes(classes),
+            tone="warn" if classes[TAG_ANONYMIZATION] or classes[TAG_ABUSE] else None)
 
     # -- 社群情資：高價值風險訊號，必須進摘要 --
     context = attributes.get("crowdsourced_context")
@@ -890,15 +981,16 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
     if isinstance(context, list) and context:
         severities = [to_text(c.get("severity")) for c in context if isinstance(c, dict)]
         builder.add_summary(
-            "社群情資", context,
+            "社群情資", context, path=_VT_ATTR + "crowdsourced_context",
             text=f"{len(context)} 筆" + (f"（最高嚴重度：{_max_severity(severities)}）" if severities else ""),
             tone="warn")
         collapsed = _humanize_table(
             collapse_records([c for c in context if isinstance(c, dict)]), now)
         builder.add_section("crowdsourced", "社群情資", "table",
-                            {"table": collapsed, "count": len(context)})
+                            {"table": collapsed, "count": len(context),
+                             "path": _VT_ATTR + "crowdsourced_context"})
     else:
-        builder.add_summary("社群情資", None)
+        builder.add_summary("社群情資", None, path=_VT_ATTR + "crowdsourced_context")
 
     time_fields = [("VT 首次觀察時間", "first_seen_date", False),
                    ("最後掃描時間", "last_analysis_date", False)]
@@ -911,6 +1003,9 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
         described = describe_time(raw_value, key, is_expiry=is_expiry, now=now)
         tone = "risk" if (is_expiry and described and "已過期" in described) else None
         builder.add_summary(label, raw_value, path=_VT_ATTR + key, text=described, tone=tone)
+    if target_type != "ip":
+        _add_domain_age(builder, attr("creation_date"), "creation_date",
+                        _VT_ATTR + "creation_date", now)
 
     _add_vt_derived_checks(builder, attributes, now)
 
@@ -924,7 +1019,8 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
         builder.add_section("dns_records", "最近 DNS 紀錄", "table",
                             {"table": _humanize_table(collapse_records(
                                 [r for r in dns_records if isinstance(r, dict)]), now),
-                             "count": len(dns_records)})
+                             "count": len(dns_records),
+                             "path": _VT_ATTR + "last_dns_records"})
 
     ranks = attributes.get("popularity_ranks")
     builder.consume_prefix(_VT_ATTR + "popularity_ranks")
@@ -945,6 +1041,9 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
             "categories", "廠商分類",
             [{"label": k, "path": f"{_VT_ATTR}categories.{k}", "value": to_text(v)}
              for k, v in categories.items()])
+
+    builder.add_fields_section("cert_summary", "HTTPS 憑證摘要",
+                               _cert_summary_rows(attributes.get("last_https_certificate"), now))
 
     # -- 體積大、判讀價值低者一律收合 --
     for key in _VT_BULKY_KEYS:
@@ -994,7 +1093,9 @@ def _build_vt_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) 
         parsed_networks = whois_networks(parse_whois_text(whois_text))
         if parsed_networks:
             note += f"（解析到的網段：{'、'.join(parsed_networks)}）"
-        builder.add_section("vt_whois", "WHOIS 原文", "text", {"text": whois_text},
+        builder.add_section("vt_whois", "WHOIS 原文", "text",
+                            {"text": whois_text, "path": _VT_ATTR + "whois",
+                             "out_of_scope": bool(scope_warning), "networks": parsed_networks},
                             collapsed=True, note=note)
 
     _add_legal_section(builder, VT_LABELS, prefix=_VT_ATTR)
@@ -1072,6 +1173,19 @@ def _max_severity(severities: list[str]) -> str:
     return ranked[-1]
 
 
+def _add_domain_age(builder: ViewBuilder, raw_value: Any, field_name: str, path: str,
+                    now: Optional[datetime]) -> None:
+    """網域年齡：程式先算好「建立距查詢時間 N 天」，模型就不必做日期減法，
+    新近註冊的判準也能穩定套用。python-whois 的日期可能是多筆清單，取最早一筆。"""
+    values = raw_value if isinstance(raw_value, list) else [raw_value]
+    parsed = [t for t in (parse_time(v, field_name) for v in values) if t is not None]
+    if not parsed:
+        return
+    days = ((now or datetime.now(TW_TZ)) - min(parsed)).days
+    builder.add_summary("網域年齡（系統衍生）", days, path=path,
+                        text=f"建立距查詢時間 {days} 天")
+
+
 def _add_vt_derived_checks(builder: ViewBuilder, attributes: dict,
                            now: Optional[datetime]) -> None:
     """衍生指標：只做幾組有明確判讀意義的比較。
@@ -1085,7 +1199,7 @@ def _add_vt_derived_checks(builder: ViewBuilder, attributes: dict,
         stale_days = (now - last_analysis).days
         if stale_days >= 30:
             builder.add_summary(
-                "掃描資料時效", stale_days,
+                "掃描資料時效（系統衍生）", stale_days, path=_VT_ATTR + "last_analysis_date",
                 text=f"最後一次掃描在 {stale_days} 天前",
                 note="掃描結果已有一段時間未更新，判讀時請把時效納入考量。",
                 tone="warn")
@@ -1098,7 +1212,8 @@ def _add_vt_derived_checks(builder: ViewBuilder, attributes: dict,
         # 實測 example.com 註冊於 1995 年、VT 2023 年首次觀察，差 10272 天但毫無意義。
         gap_days = (creation - first_seen).days
         builder.add_summary(
-            "首次觀察早於建立時間", gap_days,
+            "首次觀察早於建立時間（系統衍生）", gap_days,
+            path=f"{_VT_ATTR}first_seen_date / {_VT_ATTR}creation_date",
             text=f"VirusTotal 早於註冊建立時間 {gap_days} 天就已觀察到此目標",
             note="可能代表此目標曾被註冊、釋出後再重新註冊，或其中一方的時間資料有誤。",
             tone="warn")
@@ -1130,7 +1245,11 @@ def process(result: dict, now: Optional[datetime] = None) -> dict:
 
     任何規則出錯都不得讓查詢失敗——查得到資料本身比版面重要，因此整段包在
     try/except 內，失敗時退回「全欄位攤平」的原始呈現並附上告警。
+
+    now 預設為結果上的查詢時間：相對時間與衍生指標描述的是「查詢當時」的狀態，
+    快取或隔一段時間才檢視的結果也不會漂移。
     """
+    now = now or queried_at(result)
     profile_name = detect_profile(result)
     builder_fn, table = _PROFILES[profile_name]
     flat = flatten(result.get("data") or {})
@@ -1157,91 +1276,199 @@ def _fallback_view(flat: dict[str, Any], table: dict[str, str]) -> dict:
         "sections": [{"id": "fallback", "title": "全部欄位", "kind": "fields",
                       "collapsed": False, "note": None, "rows": rows}],
         "hidden": {"count": 0, "empty_count": 0, "fields": []},
-        "unknown_fields": [],
     }
 
 
-def flatten_for_export(data: Any) -> dict[str, str]:
-    """匯出用的完整攤平。匯出檔常被拿去當工單附件或存證，一欄都不能少，
-    因此不套用任何摘要或摺疊規則。"""
-    return {path: to_text(value) for path, value in flatten(data).items()}
+def is_envelope(payload: Any) -> bool:
+    """判斷是完整查詢結果（含 source，能決定 schema）還是只有 data。
+
+    只有 data 時無從得知是哪一套 schema，不能亂猜 profile 而把欄位對錯。
+    """
+    return (isinstance(payload, dict) and isinstance(payload.get("data"), dict)
+            and bool(payload.get("source")))
+
+
+def queried_at(result: Any) -> Optional[datetime]:
+    """解析查詢結果上的「查詢時間」字串（format_time 的格式）。解析不到回 None。
+
+    相對時間與衍生指標都必須以這個時間為基準，不能用分析當下：分析師可能隔了
+    一段時間才按「進階分析」，基準漂移會讓「42 分鐘前的掃描」變成「41 天前」。
+    """
+    if not isinstance(result, dict):
+        return None
+    raw = to_text(result.get("queried_at")).replace("(UTC+8)", "").strip()
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TW_TZ)
+    except ValueError:
+        return None
 
 
 # 送進 LLM 時略過的區塊。理由不是「體積大」而是「對判讀沒有新資訊」：
 # vt_rdap 與 RDAP 那一份是同一組事實（重複餵會讓模型誤以為有兩個獨立佐證）、
-# 憑證內部欄位與法律樣板則本來就不進風險判讀。
-_LLM_SKIP_SECTIONS = {"vt_rdap", "vt_last_https_certificate", "raw_rdap", "legal"}
+# 憑證原始欄位已有 cert_summary 摘要、法律樣板則本來就不進風險判讀。
+_LLM_SKIP_SECTIONS = {"vt_rdap", "vt_last_https_certificate", "legal"}
 
 _LLM_SKIP_REASON = {
     "vt_rdap": "與 RDAP/WHOIS 區段描述同一物件，為避免同一組事實被當成兩個獨立佐證，此處不重複列出",
-    "vt_last_https_certificate": "HTTPS 憑證原始欄位，與風險屬性判讀無關",
-    "raw_rdap": "RDAP 原始回應，內容已由上方欄位涵蓋",
+    "vt_last_https_certificate": "憑證原始欄位，判讀用的欄位已列於「HTTPS 憑證摘要」",
     "legal": "註冊局固定樣板文字",
 }
 
+# 對判讀沒有用的列：物件 ID／類型／API 連結，以及 LLM 只看雜湊值無從判讀的 JARM。
+_LLM_SKIP_PATHS = {"data.id", "data.type", "data.links.self", _VT_ATTR + "jarm"}
 
-def summarize_for_llm(result: Optional[dict]) -> str:
-    """給 LLM 的精簡輸入：摘要 + 各區塊的非空欄位，略過空欄位、重複 entity、
-    89 家引擎的原始字串，以及與其他區段重複的內容。
+# 聯絡人的物件類型（一律是 entity）與所屬 RIR（同頂層的 rir）每個聯絡人都重複一次。
+_LLM_SKIP_ENTITY_KEYS = (".type", ".rir")
 
-    每一列都帶原始欄位路徑——SYSTEM_PROMPT 要求模型為每項風險屬性標註欄位路徑
-    供分析師回查，翻譯後的中文名稱不能取代路徑。
+_SOURCE_PREFIX = {"whoisit": "RDAP", "pywhois": "WHOIS", "vt": "VT"}
+
+# RDAP 成功時，網域 WHOIS 原文中這些行與 RDAP 區段描述的是同一組事實。
+_RDAP_COVERED_WHOIS_KEYS = {
+    "domain name", "domain", "creation date", "registry expiry date",
+    "registrar registration expiration date", "expiration date", "updated date",
+    "name server", "nserver", "domain status", "status", "registrar", "dnssec",
+    "registry domain id", "registrar iana id",
+}
+
+_LINE_BREAKS_RE = re.compile(r"\r\n|[\r\n\x0b\x0c\x85  ]")
+
+
+def one_line(value: Any) -> str:
+    """把值壓成單行，換行改成可見的 ⏎。
+
+    沒有這一步，registrant 名稱等欄位裡的換行可以讓偽造的「[注意] …」或
+    「【VirusTotal 資料】缺失」獨占一行，長得跟系統產生的行一模一樣。
+    """
+    return _LINE_BREAKS_RE.sub(" ⏎ ", to_text(value))
+
+
+def _whois_line_key(line: str) -> Optional[str]:
+    match = _WHOIS_LINE_RE.match(line)
+    return match.group(1).strip().lower() if match else None
+
+
+def llm_digest(result: Optional[dict], *, rdap_available: bool = False) -> dict:
+    """給 LLM 的精簡輸入：{"text": 待分析資料, "notes": 系統提醒}。
+
+    text 只放原始事實：每列「中文名稱（來源:原始欄位路徑）: 值」，略過空欄位、
+    重複 entity、89 家引擎的原始字串、與其他區段重複的內容；所有值壓成單行，
+    WHOIS 原文每行加「│ 」前綴，資料永遠無法以 `[` 或 `【` 開頭偽造整行。
+    notes 是程式產生的提醒（警示、欄位註解），由呼叫端放進 system，不與資料混放。
+
+    rdap_available：同次分析是否有成功的 RDAP 結果。有的話，網域 WHOIS 原文只列
+    RDAP 沒涵蓋的行，避免同一組事實被當成兩個佐證。
     """
     if not result:
-        return "（無資料）"
-    processed = process(result)
+        return {"text": "（無資料）", "notes": []}
+    profile = detect_profile(result)
+    source = _SOURCE_PREFIX[profile]
+    processed = process(result, now=queried_at(result))
     view = processed["view"]
-    lines = []
+    lines: list[str] = []
+    notes: list[str] = []
+
+    def ref(path: Optional[str]) -> str:
+        return f"（{source}:{one_line(path)}）" if path else ""
+
+    def add_note(text: str) -> None:
+        if text not in notes:
+            notes.append(text)
+
     for item in view["summary"]:
-        path = f"（{item['path']}）" if item.get("path") else ""
-        lines.append(f"{item['label']}{path}: {item['value']}")
+        lines.append(f"{one_line(item['label'])}{ref(item.get('path'))}: {one_line(item['value'])}")
         if item.get("note"):
-            lines.append(f"    註：{item['note']}")
+            # summary 的標籤、路徑、註解都是程式內的固定字串，不含資料
+            add_note(f"{source} {item['label']}{ref(item.get('path'))}：{item['note']}")
 
     for section in view["sections"]:
+        title = one_line(section["title"])
         if section["id"] in _LLM_SKIP_SECTIONS:
-            lines.append(f"[{section['title']}] （已略過：{_LLM_SKIP_REASON[section['id']]}）")
+            lines.append(f"[{title}] （已略過：{_LLM_SKIP_REASON[section['id']]}）")
             continue
-        if section.get("note"):
-            lines.append(f"[{section['title']}] 說明：{section['note']}")
         if section["kind"] == "engines":
-            engines = section.get("engines") or {}
-            if not engines.get("available"):
-                lines.append(f"[{section['title']}] {engines.get('reason', '')}")
-                continue
-            counts = engines["counts"]
-            lines.append(f"[{section['title']}] 共 {engines['total']} 家；異常 "
-                         f"{counts['abnormal']} 家、正常 {counts['normal']} 家、"
-                         f"未取得結論 {counts['inconclusive']} 家")
-            if engines.get("mismatch"):
-                lines.append(f"  [注意] {engines['mismatch']}")
-            for entry in engines["abnormal"]:
-                lines.append(f"  - {entry['engine']}（data.attributes.last_analysis_results."
-                             f"{entry['engine']}.category）: {entry['category']} / {entry['result']}")
-            continue
-        if section["kind"] == "text":
-            lines.append(f"[{section['title']}]\n{section.get('text', '')}")
-            continue
-        if section["kind"] == "table":
-            table = section.get("table") or {}
-            lines.append(f"[{section['title']}] 欄位: {', '.join(table.get('columns', []))}")
-            for row in table.get("rows", []):
-                lines.append("  - " + "; ".join(to_text(c) for c in row))
-            continue
-        for row in section.get("rows", []):
-            lines.append(f"[{section['title']}] {row['label']}（{row['path']}）: {row['value']}")
+            lines.extend(_engine_lines(section, title, add_note))
+        elif section["kind"] == "text":
+            lines.extend(_text_section_lines(section, title, source, result, rdap_available))
+        elif section["kind"] == "table":
+            lines.extend(_table_lines(section, title, source))
+        else:
+            for row in section.get("rows", []):
+                path = row["path"]
+                if path in _LLM_SKIP_PATHS or (path.startswith("entities.")
+                                               and path.endswith(_LLM_SKIP_ENTITY_KEYS)):
+                    continue
+                lines.append(f"[{title}] {one_line(row['label'])}{ref(path)}: {one_line(row['value'])}")
 
     hidden = view.get("hidden") or {}
     if hidden.get("count"):
         lines.append(f"[已省略欄位] {hidden['count']} 個欄位在來源中存在但為空值，"
                      "屬於「來源未填寫」而非「本系統未取得」。")
-    # 警示常常已經附在對應區塊的說明裡（例如 whois 母網段警示）。再貼一次不會更
-    # 安全，只會讓模型把同一則提醒讀成兩筆各自獨立的觀察。
-    emitted = "\n".join(lines)
     for warning in view.get("warnings", []):
-        if warning not in emitted:
-            lines.append(f"[注意] {warning}")
-    return "\n".join(lines) if lines else "（無資料）"
+        if warning.startswith("後處理失敗"):
+            # 例外訊息可能夾帶資料內容，不得帶進 system
+            warning = f"{source} 後處理失敗，此來源以原始欄位逐列呈現（未經摘要）。"
+        # 不加來源前綴：同一則警示（例如 whois 母網段）跨來源比對也會產生，呼叫端靠
+        # 全文比對去重，前綴不同就會變成兩筆
+        add_note(warning)
+    return {"text": "\n".join(lines) if lines else "（無資料）", "notes": notes}
+
+
+def summarize_for_llm(result: Optional[dict], *, rdap_available: bool = False) -> str:
+    """llm_digest 的資料部分（不含系統提醒）。"""
+    return llm_digest(result, rdap_available=rdap_available)["text"]
+
+
+def _engine_lines(section: dict, title: str, add_note) -> list[str]:
+    engines = section.get("engines") or {}
+    if not engines.get("available"):
+        return [f"[{title}] {engines.get('reason', '')}"]
+    counts = engines["counts"]
+    lines = [f"[{title}] 共 {engines['total']} 家；異常 {counts['abnormal']} 家、"
+             f"正常 {counts['normal']} 家、未取得結論 {counts['inconclusive']} 家"]
+    if engines.get("mismatch"):
+        add_note(f"VT {section['title']}：{engines['mismatch']}")
+    for entry in engines["abnormal"]:
+        engine = one_line(entry["engine"])
+        lines.append(f"  - {engine}（VT:data.attributes.last_analysis_results.{engine}.category）: "
+                     f"{one_line(entry['category'])} / {one_line(entry['result'])}")
+    return lines
+
+
+def _text_section_lines(section: dict, title: str, source: str, result: dict,
+                        rdap_available: bool) -> list[str]:
+    path = section.get("path")
+    ref = f"（{source}:{path}）" if path else ""
+    text = section.get("text") or ""
+    if section.get("out_of_scope"):
+        networks = "、".join(section.get("networks") or []) or "無法解析"
+        return [f"[{title}]{ref} 已略過：描述的區塊為 {networks}，不是查詢目標的直接分配資訊"
+                "（上層委派紀錄或未涵蓋查詢目標），其組織與聯絡窗口不屬於查詢目標"]
+    text_lines = [line for line in text.splitlines() if line.strip()]
+    header = f"[{title}]{ref}"
+    if rdap_available and result.get("type") == "domain":
+        text_lines = [line for line in text_lines
+                      if _whois_line_key(line) not in _RDAP_COVERED_WHOIS_KEYS]
+        if not text_lines:
+            return [f"{header} 已略過：內容與 RDAP 區段重複"]
+        header = f"[{title}，僅列 RDAP 未涵蓋的行]{ref}"
+    return [header] + [f"│ {one_line(line)}" for line in text_lines]
+
+
+def _table_lines(section: dict, title: str, source: str) -> list[str]:
+    table = section.get("table") or {}
+    base = section.get("path")
+    ref = f"（{source}:{base}[i]，i 為下列各筆的索引）" if base else ""
+    lines = [f"[{title}]{ref}"]
+    constant = table.get("constant") or {}
+    if constant:
+        lines.append("  各筆相同：" + "；".join(f"{one_line(k)}: {one_line(v)}"
+                                           for k, v in constant.items()))
+    columns = table.get("columns") or []
+    for index, row in enumerate(table.get("rows") or []):
+        cells = [f"{one_line(column)}: {one_line(value)}"
+                 for column, value in zip(columns, row) if not is_empty(value)]
+        lines.append(f"  - [{index}] " + "；".join(cells))
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -1543,12 +1770,21 @@ TIER_PRIMARY = "primary"
 TIER_REFERENCE = "reference"
 
 
+def _as_dict(value: Any) -> dict:
+    """/api/lookup/compare 的 body 由前端送來，形狀不保證；非 dict 一律當成空的。"""
+    return value if isinstance(value, dict) else {}
+
+
+def _vt_attributes(vt_result: Any) -> dict:
+    return _as_dict(_as_dict(_as_dict(_as_dict(vt_result).get("data")).get("data")).get("attributes"))
+
+
 def collect_sources(rdap_result: Optional[dict], vt_result: Optional[dict]) -> list[dict]:
     """把可用的來源整理成 [{label, tier, facts, note}]。取不到的來源直接不列，不報錯。"""
     sources: list[dict] = []
 
     if rdap_result:
-        data = rdap_result.get("data") or {}
+        data = _as_dict(rdap_result.get("data"))
         if detect_profile(rdap_result) == "pywhois":
             sources.append({"label": "WHOIS 備援查詢", "tier": TIER_REFERENCE,
                             "facts": _facts_from_pywhois(data),
@@ -1558,8 +1794,7 @@ def collect_sources(rdap_result: Optional[dict], vt_result: Optional[dict]) -> l
                             "facts": _facts_from_whoisit(data), "note": None})
 
     if vt_result:
-        payload = (vt_result.get("data") or {}).get("data") or {}
-        attributes = payload.get("attributes") or {}
+        attributes = _vt_attributes(vt_result)
         if attributes:
             sources.append({
                 "label": "VirusTotal 屬性", "tier": TIER_REFERENCE,
@@ -1594,7 +1829,7 @@ def compare_sources(rdap_result: Optional[dict], vt_result: Optional[dict],
     """
     sources = collect_sources(rdap_result, vt_result)
     primary_labels = [s["label"] for s in sources if s["tier"] == TIER_PRIMARY]
-    target = (rdap_result or vt_result or {}).get("target", "")
+    target = to_text((rdap_result or vt_result or {}).get("target", ""))
     rows, agreements, conflicts = [], 0, 0
 
     for key, label in FACT_KEYS:
@@ -1628,13 +1863,13 @@ def compare_sources(rdap_result: Optional[dict], vt_result: Optional[dict],
 
     warnings: list[str] = []
     if vt_result:
-        attributes = ((vt_result.get("data") or {}).get("data") or {}).get("attributes") or {}
+        attributes = _vt_attributes(vt_result)
         whois_text = attributes.get("whois")
         reference = None
         if rdap_result:
-            reference = (rdap_result.get("data") or {}).get("network")
-        reference = reference or attributes.get("network")
-        if isinstance(whois_text, str) and target:
+            reference = _as_dict(rdap_result.get("data")).get("network")
+        reference = to_text(reference or attributes.get("network")) or None
+        if isinstance(whois_text, str) and isinstance(target, str) and target:
             scope_warning = whois_scope_warning(whois_text, target, reference)
             if scope_warning:
                 warnings.append(scope_warning)

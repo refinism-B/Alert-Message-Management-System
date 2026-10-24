@@ -1,9 +1,15 @@
 import sqlite3
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
-DB_PATH = Path("data/reports.db")
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "data" / "reports.db"
+
+# Offense ID 去除空白後的值；索引與查詢必須用完全相同的運算式，SQLite 才會走索引
+_OFFENSE_EXPR = "TRIM(json_extract(fields, '$.\"Offense ID\"'))"
 
 DEFAULT_FIELDS = ["Offense ID", "觸發規則", "時間", "方向", "來源IP", "目的IP", "目的port", "防火牆action", "事件總數"]
 
@@ -19,10 +25,57 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def get_conn() -> sqlite3.Connection:
+@contextmanager
+def get_conn() -> Iterator[sqlite3.Connection]:
+    """成功 commit、例外 rollback，並且一定會 close（sqlite3 的 with 本身不會 close）。"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
+def _normalize_existing_offense_ids(conn: sqlite3.Connection) -> None:
+    """舊資料的 Offense ID 可能帶 Tab／全形空白（Python strip 會去、SQL TRIM 不會去）；
+    建唯一索引前先用 strip() 回寫，重複才能被正確偵測。"""
+    for row in conn.execute("SELECT id, fields FROM reports WHERE json_extract(fields, '$.\"Offense ID\"') IS NOT NULL").fetchall():
+        fields = json.loads(row["fields"])
+        value = fields.get("Offense ID")
+        if isinstance(value, str) and value != value.strip():
+            fields["Offense ID"] = value.strip()
+            conn.execute("UPDATE reports SET fields = ? WHERE id = ?", (json.dumps(fields, ensure_ascii=False), row["id"]))
+
+
+def _ensure_indexes(conn: sqlite3.Connection) -> None:
+    _normalize_existing_offense_ids(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_reports_date ON reports(date, created_at)")
+
+    dups = conn.execute(
+        f"SELECT {_OFFENSE_EXPR} AS dup_id, COUNT(*) AS n FROM reports "
+        f"WHERE {_OFFENSE_EXPR} <> '' GROUP BY dup_id HAVING n > 1"
+    ).fetchall()
+    existing = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'ix_reports_offense'"
+    ).fetchone()
+    is_unique = bool(existing and existing["sql"].upper().startswith("CREATE UNIQUE"))
+
+    if dups:
+        print(
+            "[警告] 既有資料中有重複的 Offense ID，無法建立唯一索引，改建非唯一索引："
+            + "、".join(f"{r['dup_id']}（{r['n']} 筆）" for r in dups)
+            + "。請手動處理重複資料後重新啟動。"
+        )
+    if existing and is_unique != (not dups):
+        conn.execute("DROP INDEX ix_reports_offense")
+        existing = None
+    if not existing:
+        unique = "" if dups else "UNIQUE "
+        conn.execute(
+            f"CREATE {unique}INDEX ix_reports_offense ON reports({_OFFENSE_EXPR}) "
+            f"WHERE {_OFFENSE_EXPR} <> ''"
+        )
 
 
 def init_db() -> None:
@@ -69,6 +122,8 @@ def init_db() -> None:
                 (json.dumps(DEFAULT_FIELDS_WAF, ensure_ascii=False), _now()),
             )
 
+        _ensure_indexes(conn)
+
 
 def get_schema(template: str = "general") -> dict:
     schema_id = TEMPLATE_IDS[template]
@@ -101,21 +156,40 @@ def _row_to_report(row: sqlite3.Row) -> dict:
     }
 
 
-def create_report(date: str, fields: dict, field_order: list[str]) -> dict:
+def _offense_exists(conn: sqlite3.Connection, offense_id: str, exclude_id: int | None = None) -> bool:
+    # 多帶 <> '' 才能讓 SQLite 推出部分索引的條件而走索引（否則全表掃描）
+    sql = f"SELECT 1 FROM reports WHERE {_OFFENSE_EXPR} = ? AND {_OFFENSE_EXPR} <> ''"
+    params: list = [offense_id]
+    if exclude_id is not None:
+        sql += " AND id != ?"
+        params.append(exclude_id)
+    return conn.execute(sql + " LIMIT 1", params).fetchone() is not None
+
+
+def _normalize_fields(fields: dict) -> tuple[dict, str]:
+    """Offense ID 存入前去除前後空白，讓 Python 與 SQL TRIM 的判斷一致。"""
     offense_id = fields.get("Offense ID", "").strip()
+    if "Offense ID" in fields:
+        fields = {**fields, "Offense ID": offense_id}
+    return fields, offense_id
+
+
+def create_report(date: str, fields: dict, field_order: list[str]) -> dict:
+    fields, offense_id = _normalize_fields(fields)
     now = _now()
-    with get_conn() as conn:
-        if offense_id:
-            rows = conn.execute("SELECT fields FROM reports").fetchall()
-            for row in rows:
-                existing = json.loads(row["fields"])
-                if existing.get("Offense ID", "").strip() == offense_id:
-                    raise ValueError("Offense ID 已存在")
-        cur = conn.execute(
-            "INSERT INTO reports (date, fields, field_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (date, json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, now),
-        )
-        row = conn.execute("SELECT * FROM reports WHERE id = ?", (cur.lastrowid,)).fetchone()
+    try:
+        with get_conn() as conn:
+            # 先取得寫入鎖再檢查，檢查與寫入之間才不會被其他連線插隊
+            conn.execute("BEGIN IMMEDIATE")
+            if offense_id and _offense_exists(conn, offense_id):
+                raise ValueError("Offense ID 已存在")
+            cur = conn.execute(
+                "INSERT INTO reports (date, fields, field_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (date, json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, now),
+            )
+            row = conn.execute("SELECT * FROM reports WHERE id = ?", (cur.lastrowid,)).fetchone()
+    except sqlite3.IntegrityError:
+        raise ValueError("Offense ID 已存在") from None
     return _row_to_report(row)
 
 
@@ -136,26 +210,31 @@ def get_dates() -> list[str]:
 
 
 def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict | None:
-    offense_id = fields.get("Offense ID", "").strip()
+    fields, offense_id = _normalize_fields(fields)
     now = _now()
-    with get_conn() as conn:
-        if offense_id:
-            rows = conn.execute("SELECT id, fields FROM reports WHERE id != ?", (report_id,)).fetchall()
-            for row in rows:
-                existing = json.loads(row["fields"])
-                if existing.get("Offense ID", "").strip() == offense_id:
-                    raise ValueError("Offense ID 已存在")
-        conn.execute(
-            "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
-        )
-        row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
-    return _row_to_report(row) if row else None
+    try:
+        with get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            # 先確認存在：不存在的 id 一律回 None（404），不論 Offense ID 是否撞到別人
+            if conn.execute("SELECT 1 FROM reports WHERE id = ?", (report_id,)).fetchone() is None:
+                return None
+            if offense_id and _offense_exists(conn, offense_id, exclude_id=report_id):
+                raise ValueError("Offense ID 已存在")
+            conn.execute(
+                "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
+            )
+            row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+    except sqlite3.IntegrityError:
+        raise ValueError("Offense ID 已存在") from None
+    return _row_to_report(row)
 
 
-def delete_report(report_id: int) -> None:
+def delete_report(report_id: int) -> bool:
+    """回傳是否真的刪到一筆。"""
     with get_conn() as conn:
-        conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+        cur = conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+        return cur.rowcount > 0
 
 
 def search_reports(q: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
@@ -175,6 +254,9 @@ def search_reports(q: str | None = None, date_from: str | None = None, date_to: 
     if q is None:
         return [_row_to_report(r) for r in rows]
 
+    # 關鍵字比對刻意留在 Python：SQLite 的 lower() 只處理 ASCII，下推到 SQL 會讓
+    # 非 ASCII 字母的大小寫不敏感比對（如 É/é）語意改變。日期範圍已由 ix_reports_date
+    # 在 SQL 端縮小，這裡只會掃描範圍內的資料。
     q_lower = q.lower()
     results = []
     for row in rows:

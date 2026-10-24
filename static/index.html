@@ -27,10 +27,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .btn-sm { padding: 8px 16px; font-size: 16px; }
 
 /* Layout */
-#layout { display: flex; flex: 1; overflow: hidden; }
+#reports-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
 /* Sidebar */
-#sidebar { width: 195px; background: #0f172a; border-right: 1px solid #1e293b; overflow: hidden; flex-shrink: 0; transition: width 0.2s ease; }
+#sidebar { width: 195px; background: #0f172a; border-right: 1px solid #1e293b; overflow: hidden; flex-shrink: 0; transition: width 0.2s ease; display: flex; flex-direction: column; }
 #sidebar.collapsed { width: 32px; }
 #sidebar.disabled .sidebar-inner { opacity: 0.4; pointer-events: none; }
 #sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #1e293b; flex-shrink: 0; }
@@ -38,22 +39,29 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #sidebar.collapsed #sidebar-header .sidebar-label { opacity: 0; pointer-events: none; }
 #sidebar-toggle { background: none; border: 1px solid #334155; border-radius: 3px; color: #475569; cursor: pointer; width: 24px; height: 24px; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 0; }
 #sidebar-toggle:hover { color: #e2e8f0; background: #1e293b; }
-.sidebar-inner { padding: 12px 8px; white-space: nowrap; overflow-y: auto; max-height: calc(100vh - 48px); transition: visibility 0.2s ease, opacity 0.2s ease; }
+.sidebar-inner { flex: 1; min-height: 0; padding: 12px 8px; white-space: nowrap; overflow-y: auto; transition: visibility 0.2s ease, opacity 0.2s ease; }
 #sidebar.collapsed .sidebar-inner { visibility: hidden; opacity: 0; }
 .date-item { padding: 7px 8px; border-radius: 4px; font-size: 17px; cursor: pointer; color: #94a3b8; margin-bottom: 2px; }
 .date-item:hover { background: #1e293b; color: #e2e8f0; }
 .date-item.active { background: #1e40af; color: #fff; }
+.date-group-header { display: flex; align-items: baseline; padding: 6px 8px; border-radius: 4px; border-left: 3px solid transparent; font-size: 15px; color: #cbd5e1; cursor: pointer; user-select: none; margin-bottom: 2px; }
+.date-group-header:hover { background: #1e293b; }
+.date-group-header.current { border-left-color: #1e40af; }
+.date-group-arrow { width: 16px; flex-shrink: 0; color: #64748b; }
+.date-group-count { color: #64748b; white-space: pre; }
+.date-group-items { padding-left: 12px; }
+.date-group.collapsed .date-group-items { display: none; }
 
 /* Main */
 #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-#main-header { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #0f172a; border-bottom: 1px solid #1e293b; }
+#main-header { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; row-gap: 8px; padding: 12px 20px; background: #0f172a; border-bottom: 1px solid #1e293b; }
 #main-content { flex: 1; overflow-y: auto; padding: 16px 20px 20px; }
 #main-title { font-size: 18px; color: #94a3b8; }
 #main-actions { display: flex; gap: 8px; }
 
 /* Report card */
 .report-card { background: #1e293b; border: 1px solid #334155; border-radius: 6px; margin-bottom: 10px; display: flex; overflow: hidden; }
-.report-card.editing { border-color: #3b82f6; }
+.report-card.editing { border-color: #3b82f6; display: block; }
 .form-container.report-card { display: block; padding: 14px; }
 .card-body { padding: 14px; flex: 1; min-width: 0; }
 @keyframes elastic-select {
@@ -86,10 +94,12 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .field-label { color: #64748b; white-space: nowrap; }
 .field-value { color: #e2e8f0; min-width: 0; overflow-wrap: anywhere; }
 .field-input { width: 100%; padding: 6px 8px; background: #0f172a; border: 1px solid #334155; border-radius: 3px; color: #e2e8f0; font-size: 17px; }
+.field-row { display: grid; grid-template-columns: 32px 20px 1fr 3fr; gap: 6px; align-items: center; margin-bottom: 4px; }
 .field-row .btn-danger { padding: 3px 5px; font-size: 14px; }
+.key-label { font-size: 17px; color: #cbd5e1; padding: 4px 8px; }
+.drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
 .card-actions { display: flex; gap: 6px; }
 .edit-label { font-size: 15px; color: #3b82f6; margin-bottom: 8px; }
-.report-card.editing { display: block; }
 .report-card.editing .edit-label { text-align: center; padding: 10px 14px 6px; margin-bottom: 0; }
 .report-card.editing .card-actions { justify-content: center; gap: 12px; }
 
@@ -205,7 +215,6 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .tab-btn.active { background: #1e40af; border-color: #1e40af; color: #fff; }
 
 /* Main-header search row (relocated from topbar) */
-#main-header { flex-wrap: wrap; row-gap: 8px; }
 #main-header-search { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* IP lookup page (filled in Task 9) */
@@ -225,6 +234,24 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .iplookup-meta { background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; }
 .iplookup-meta > div { display: flex; gap: 8px; }
 .iplookup-empty, .iplookup-loading { color: #475569; padding: 30px; text-align: center; }
+.iplookup-loading-analysis { color: #e2e8f0; font-weight: 600; }
+.iplookup-settings-btn { margin-left: auto; }
+#settings-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 300; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 60px 16px; }
+#settings-overlay.open { display: flex; }
+#settings-dialog { background: #0f172a; border: 1px solid #334155; border-radius: 6px; width: 100%; max-width: 720px; }
+#settings-dialog-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 1px solid #334155; color: #e2e8f0; font-weight: 600; }
+.settings-wrap { max-width: 720px; margin: 0 auto; padding: 20px; }
+.settings-card { background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 14px 16px; margin-bottom: 14px; }
+.settings-card h3 { margin: 0 0 8px; font-size: 15px; color: #e2e8f0; }
+.settings-status { font-size: 14px; color: #94a3b8; margin-bottom: 10px; }
+.settings-status.ok { color: #86efac; }
+.settings-row { display: flex; gap: 8px; align-items: center; }
+.settings-row input, .settings-row select { flex: 1; padding: 8px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 14px; }
+.settings-row input:disabled, .settings-row select:disabled, .settings-row button:disabled { opacity: .5; cursor: not-allowed; }
+.settings-note { font-size: 13px; color: #64748b; margin-top: 8px; }
+.settings-wrap > .settings-note:first-child { margin: 0 0 12px; }
+.settings-msg { font-size: 13px; margin-top: 8px; color: #86efac; }
+.settings-msg.err { color: #fca5a5; }
 .iplookup-error { color: #fca5a5; background: #450a0a; border: 1px solid #7f1d1d; border-radius: 4px; padding: 12px; }
 .iplookup-disclaimer { color: #fbbf24; font-size: 13px; margin-bottom: 10px; }
 .iplookup-analysis-content { font-family: inherit; background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 12px 16px; font-size: 15px; line-height: 1.6; }
@@ -319,7 +346,6 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
         </div>
       </div>
       <div id="main-content">
-        <div id="add-form-container" style="display:none"></div>
         <div id="reports-container"></div>
       </div>
     </div>
@@ -330,24 +356,51 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
   <div id="iplookup-root"></div>
 </div>
 
+<!-- IP 查詢的金鑰／模型設定；只從 IP 查詢頁開啟 -->
+<div id="settings-overlay" onclick="if (event.target === this) closeSettings()">
+  <div id="settings-dialog" role="dialog" aria-label="IP 查詢設定">
+    <div id="settings-dialog-header">
+      IP 查詢設定
+      <button class="btn btn-secondary btn-sm" onclick="closeSettings()">✕ 關閉</button>
+    </div>
+    <div id="settings-root"></div>
+  </div>
+</div>
+
 <script>
 let currentDate = null;
 let currentReports = [];
 let schemaByTemplate = { general: [], waf: [] };
 let isSearchMode = false;
 let sortOrder = 'desc';
-
-let activeAppTab = 'reports';
+// 每次切換主畫面（選日期／搜尋）遞增；較晚發出的請求才有資格寫入畫面
+let viewSeq = 0;
 
 function switchAppTab(tab) {
-  activeAppTab = tab;
   document.getElementById('reports-tab').style.display = tab === 'reports' ? '' : 'none';
   document.getElementById('lookup-tab').style.display = tab === 'lookup' ? '' : 'none';
   document.getElementById('tab-btn-reports').classList.toggle('active', tab === 'reports');
   document.getElementById('tab-btn-lookup').classList.toggle('active', tab === 'lookup');
 }
 
-const today = new Date().toISOString().split('T')[0];
+function openSettings() {
+  document.getElementById('settings-overlay').classList.add('open');
+  if (window.settingsRefresh) window.settingsRefresh();
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.remove('open');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('settings-overlay').classList.contains('open')) closeSettings();
+});
+
+// 本地日期（不是 UTC）；每次即時取值，頁面開著跨過午夜也正確
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
@@ -366,50 +419,190 @@ async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   if (!r.ok) {
-    let msg;
+    // body 只能讀一次：先取文字再嘗試解析，避免 json() 失敗後 text() 拋 "body used already"
+    const raw = await r.text();
+    let msg = raw || `${r.status} ${r.statusText}`;
     try {
-      const err = await r.json();
-      msg = err.detail || JSON.stringify(err);
-    } catch {
-      msg = await r.text();
-    }
+      const err = JSON.parse(raw);
+      if (typeof err.detail === 'string') {
+        msg = err.detail;
+      } else if (Array.isArray(err.detail)) {
+        // FastAPI 422：detail 是驗證錯誤陣列，只取人看得懂的 msg
+        msg = err.detail.map(d => String(d.msg ?? JSON.stringify(d)).replace(/^Value error, /, '')).join('；');
+      } else if (err.detail !== undefined) {
+        msg = JSON.stringify(err.detail);
+      }
+    } catch {}
     throw new Error(msg);
   }
   return r.json();
 }
 
+// 日期依 YYYY-MM 分組：組由新到舊、組內日期由新到舊
+function groupDatesByMonth(dates) {
+  const groups = new Map();
+  [...dates].sort().reverse().forEach(d => {
+    const ym = dateYm(d);
+    if (!groups.has(ym)) groups.set(ym, { ym, label: ymLabel(ym), dates: [] });
+    groups.get(ym).dates.push(d);
+  });
+  return [...groups.values()].sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0));
+}
+
+function dateYm(date) {
+  return String(date).slice(0, 7);
+}
+
+function ymLabel(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  return m ? `${m[1]}年${Number(m[2])}月` : ym;
+}
+
+// 已展開的 YYYY-MM；存在 localStorage，讀寫失敗時只留在記憶體
+const DATE_GROUPS_KEY = 'dateGroupsExpanded';
+const expandedGroups = loadExpandedGroups();
+
+function loadExpandedGroups() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DATE_GROUPS_KEY));
+    if (Array.isArray(saved)) return new Set(saved.filter(v => typeof v === 'string'));
+  } catch {}
+  return new Set();
+}
+
+function saveExpandedGroups() {
+  try {
+    localStorage.setItem(DATE_GROUPS_KEY, JSON.stringify([...expandedGroups]));
+  } catch {}
+}
+
+function setGroupExpanded(group, expanded) {
+  group.classList.toggle('collapsed', !expanded);
+  group.querySelector('.date-group-arrow').textContent = expanded ? '▾' : '▸';
+}
+
+function toggleDateGroup(group) {
+  const ym = group.dataset.ym;
+  const expanded = !expandedGroups.has(ym);
+  if (expanded) expandedGroups.add(ym);
+  else expandedGroups.delete(ym);
+  saveExpandedGroups();
+  setGroupExpanded(group, expanded);
+}
+
+function buildDateItem(date, text) {
+  const item = document.createElement('div');
+  item.className = 'date-item';
+  item.dataset.date = date;
+  item.textContent = text;
+  item.onclick = () => selectDate(date);
+  return item;
+}
+
+// 只在 init、新增成功、刪除成功後呼叫；選日期只切換標示（markActiveDate）
 async function loadDates() {
-  const dates = await api('GET', '/api/dates');
+  let dates;
+  try {
+    dates = await api('GET', '/api/dates');
+  } catch (e) {
+    showToast(`日期列表載入失敗：${e.message}`, 'error');
+    return;
+  }
+  const today = todayStr();
+  const groups = groupDatesByMonth(dates);
+  if (!dates.includes(today) && !groups.some(g => g.ym === dateYm(today))) {
+    groups.push({ ym: dateYm(today), label: ymLabel(dateYm(today)), dates: [] });
+    groups.sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0));
+  }
+
   const list = document.getElementById('date-list');
   list.innerHTML = '';
-  if (!dates.includes(today)) {
-    const item = document.createElement('div');
-    item.className = 'date-item' + (currentDate === today ? ' active' : '');
-    item.textContent = today + ' ●';
-    item.onclick = () => selectDate(today);
-    list.appendChild(item);
-  }
-  dates.forEach(d => {
-    const item = document.createElement('div');
-    item.className = 'date-item' + (currentDate === d ? ' active' : '');
-    item.textContent = d;
-    item.onclick = () => selectDate(d);
-    list.appendChild(item);
+  groups.forEach(g => {
+    const group = document.createElement('div');
+    group.className = 'date-group';
+    group.dataset.ym = g.ym;
+
+    const header = document.createElement('div');
+    header.className = 'date-group-header';
+    const arrow = document.createElement('span');
+    arrow.className = 'date-group-arrow';
+    const label = document.createElement('span');
+    label.textContent = g.label;
+    const count = document.createElement('span');
+    count.className = 'date-group-count';
+    count.textContent = ` (${g.dates.length})`;
+    header.append(arrow, label, count);
+    header.onclick = () => toggleDateGroup(group);
+
+    const items = document.createElement('div');
+    items.className = 'date-group-items';
+    // 「今天 ●」佔位項目放在今天所屬月份的最上方，不計入組計數
+    if (g.ym === dateYm(today) && !dates.includes(today)) items.appendChild(buildDateItem(today, today + ' ●'));
+    g.dates.forEach(d => items.appendChild(buildDateItem(d, d)));
+
+    group.append(header, items);
+    setGroupExpanded(group, expandedGroups.has(g.ym));
+    list.appendChild(group);
   });
+  markActiveDate();
+}
+
+// 標示 currentDate，並確保它所在的組是展開的（使用者手動收合的其他組不動）
+function markActiveDate() {
+  const list = document.getElementById('date-list');
+  list.querySelectorAll('.date-item.active').forEach(el => el.classList.remove('active'));
+  list.querySelectorAll('.date-group-header.current').forEach(el => el.classList.remove('current'));
+  if (!currentDate) return;
+  const item = [...list.querySelectorAll('.date-item')].find(el => el.dataset.date === currentDate);
+  if (!item) return;
+  item.classList.add('active');
+  const group = item.closest('.date-group');
+  group.querySelector('.date-group-header').classList.add('current');
+  if (!expandedGroups.has(group.dataset.ym)) {
+    expandedGroups.add(group.dataset.ym);
+    saveExpandedGroups();
+  }
+  setGroupExpanded(group, true);
+}
+
+let searchLabel = '';
+
+function updateMainTitle() {
+  const n = document.querySelectorAll('#reports-container > .report-card').length;
+  document.getElementById('main-title').textContent = isSearchMode
+    ? `${searchLabel} — ${n} 筆結果`
+    : `${currentDate}　${n} 筆通報`;
+}
+
+function showInitError(message) {
+  document.getElementById('main-title').textContent = `載入失敗：${message}`;
+  const container = document.getElementById('reports-container');
+  container.innerHTML = '<div id="no-results"><button class="btn btn-primary btn-sm">重試</button></div>';
+  container.querySelector('button').onclick = init;
 }
 
 async function selectDate(date) {
+  const seq = ++viewSeq;
+  let reports;
+  try {
+    reports = await api('GET', `/api/reports?${new URLSearchParams({ date })}`);
+  } catch (e) {
+    if (seq !== viewSeq) return;
+    showToast(`載入失敗：${e.message}`, 'error');
+    if (!currentDate) showInitError(e.message);
+    return;
+  }
+  if (seq !== viewSeq) return;
   currentDate = date;
   isSearchMode = false;
   document.getElementById('sidebar').classList.remove('disabled');
   document.getElementById('clear-search-btn').style.display = 'none';
   document.getElementById('select-all-btn').style.display = '';
   document.getElementById('copy-selected-btn').style.display = '';
-  await loadDates();
-  const reports = await api('GET', `/api/reports?date=${date}`);
   currentReports = reports;
-  document.getElementById('main-title').textContent = `${date}　${reports.length} 筆通報`;
   renderReports(reports);
+  updateMainTitle();
+  markActiveDate();
 }
 
 async function doSearch() {
@@ -427,15 +620,23 @@ async function doSearch() {
   if (dateFrom) params.set('date_from', dateFrom);
   if (dateTo) params.set('date_to', dateTo);
 
-  const data = await api('GET', `/api/search?${params}`);
+  const seq = ++viewSeq;
+  let data;
+  try {
+    data = await api('GET', `/api/search?${params}`);
+  } catch (e) {
+    if (seq === viewSeq) showToast(`搜尋失敗：${e.message}`, 'error');
+    return;
+  }
+  if (seq !== viewSeq) return;
   isSearchMode = true;
   document.getElementById('sidebar').classList.add('disabled');
   document.getElementById('clear-search-btn').style.display = '';
   document.getElementById('select-all-btn').style.display = 'none';
   document.getElementById('copy-selected-btn').style.display = 'none';
-  const label = q ? `搜尋「${q}」` : '日期區間搜尋';
-  document.getElementById('main-title').textContent = `${label} — ${data.reports.length} 筆結果`;
+  searchLabel = q ? `搜尋「${q}」` : '日期區間搜尋';
   renderReports(data.reports, true);
+  updateMainTitle();
 }
 
 function clearSearch() {
@@ -446,9 +647,12 @@ function clearSearch() {
 }
 
 let schemaDrawerTemplate = 'general';
+// 抽屜只改這份草稿，儲存成功才寫回 schemaByTemplate；取消即丟棄
+let schemaDraft = null;
 
 function openSchemaDrawer() {
   schemaDrawerTemplate = 'general';
+  schemaDraft = structuredClone(schemaByTemplate);
   renderSchemaDrawerTabs();
   renderSchemaPanel();
   const overlay = document.getElementById('drawer-overlay');
@@ -472,9 +676,22 @@ function closeSchemaDrawer() {
 
 function renderSchemaDrawerTabs() {
   const tabs = document.getElementById('schema-drawer-tabs');
-  tabs.innerHTML = Object.entries(TEMPLATE_LABELS).map(([key, label]) =>
-    `<div class="drawer-tab${key === schemaDrawerTemplate ? ' active' : ''}" onclick="switchSchemaDrawerTemplate('${key}')">${label}</div>`
-  ).join('');
+  tabs.innerHTML = '';
+  Object.entries(TEMPLATE_LABELS).forEach(([key, label]) => {
+    const tab = document.createElement('div');
+    tab.className = 'drawer-tab' + (key === schemaDrawerTemplate ? ' active' : '');
+    tab.textContent = label;
+    tab.onclick = () => switchSchemaDrawerTemplate(key);
+    tabs.appendChild(tab);
+  });
+}
+
+function makeButton(className, text, onClick) {
+  const btn = document.createElement('button');
+  btn.className = className;
+  btn.textContent = text;
+  btn.onclick = onClick;
+  return btn;
 }
 
 function switchSchemaDrawerTemplate(template) {
@@ -485,24 +702,34 @@ function switchSchemaDrawerTemplate(template) {
 
 function renderSchemaPanel() {
   const panel = document.getElementById('schema-drawer-content');
-  const fields = schemaByTemplate[schemaDrawerTemplate];
-  const rows = fields.map((f, i) => `
-    <div class="schema-row" data-index="${i}" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
-      <input class="field-input" value="${f}" style="flex:1" oninput="schemaByTemplate['${schemaDrawerTemplate}'][${i}]=this.value">
-      <button class="btn btn-secondary btn-sm" onclick="schemaRowUp(${i})">↑</button>
-      <button class="btn btn-danger btn-sm" onclick="schemaByTemplate['${schemaDrawerTemplate}'].splice(${i},1);renderSchemaPanel()">✕</button>
-    </div>`).join('');
-  panel.innerHTML = `
-    <div id="schema-rows">${rows}</div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <input id="new-field-input" class="field-input" placeholder="新欄位名稱" style="flex:1">
-      <button class="btn btn-success btn-sm" onclick="addSchemaField()">＋ 新增</button>
-    </div>`;
+  const fields = schemaDraft[schemaDrawerTemplate];
+  panel.innerHTML = '';
+  const rows = document.createElement('div');
+  fields.forEach((f, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
+    const input = document.createElement('input');
+    input.className = 'field-input';
+    input.style.flex = '1';
+    input.value = f;
+    input.oninput = () => { fields[i] = input.value; };
+    row.append(
+      input,
+      makeButton('btn btn-secondary btn-sm', '↑', () => schemaRowUp(i)),
+      makeButton('btn btn-danger btn-sm', '✕', () => { fields.splice(i, 1); renderSchemaPanel(); })
+    );
+    rows.appendChild(row);
+  });
+  const addRow = document.createElement('div');
+  addRow.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+  addRow.innerHTML = '<input id="new-field-input" class="field-input" placeholder="新欄位名稱" style="flex:1">';
+  addRow.appendChild(makeButton('btn btn-success btn-sm', '＋ 新增', addSchemaField));
+  panel.append(rows, addRow);
 }
 
 function schemaRowUp(i) {
   if (i === 0) return;
-  const arr = schemaByTemplate[schemaDrawerTemplate];
+  const arr = schemaDraft[schemaDrawerTemplate];
   [arr[i-1], arr[i]] = [arr[i], arr[i-1]];
   renderSchemaPanel();
 }
@@ -511,28 +738,45 @@ function addSchemaField() {
   const input = document.getElementById('new-field-input');
   const val = input.value.trim();
   if (!val) return;
-  schemaByTemplate[schemaDrawerTemplate].push(val);
+  schemaDraft[schemaDrawerTemplate].push(val);
   input.value = '';
   renderSchemaPanel();
 }
 
 async function saveSchema() {
+  const btn = document.getElementById('schema-save-btn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const template = schemaDrawerTemplate;
   try {
-    await api('PUT', `/api/schema?template=${schemaDrawerTemplate}`, { fields: schemaByTemplate[schemaDrawerTemplate] });
+    const res = await api('PUT', `/api/schema?${new URLSearchParams({ template })}`, { fields: schemaDraft[template] });
+    schemaByTemplate[template] = res.fields;
+    schemaDraft[template] = [...res.fields];
+    showToast('欄位已儲存');
     closeSchemaDrawer();
   } catch (e) {
     showToast(`儲存失敗：${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 
 async function init() {
-  schemaByTemplate.general = (await api('GET', '/api/schema?template=general')).fields;
-  schemaByTemplate.waf = (await api('GET', '/api/schema?template=waf')).fields;
+  document.getElementById('main-title').textContent = '載入中...';
+  try {
+    const [general, waf] = await Promise.all([
+      api('GET', '/api/schema?template=general'),
+      api('GET', '/api/schema?template=waf'),
+    ]);
+    schemaByTemplate.general = general.fields;
+    schemaByTemplate.waf = waf.fields;
+  } catch (e) {
+    showToast(`載入失敗：${e.message}`, 'error');
+    showInitError(e.message);
+    return;
+  }
   await loadDates();
-  await selectDate(today);
-  document.getElementById('search-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doSearch();
-  });
+  await selectDate(todayStr());
 }
 
 function sortedReports(reports) {
@@ -544,7 +788,7 @@ function toggleSort() {
   document.getElementById('sort-btn').textContent = sortOrder === 'desc' ? '排序↓' : '排序↑';
   if (isSearchMode) {
     const container = document.getElementById('reports-container');
-    const sorted = sortedReports(Array.from(container.querySelectorAll('.report-card')).map(c => c._report));
+    const sorted = sortedReports(Array.from(container.querySelectorAll(':scope > .report-card')).map(c => c._report));
     sorted.forEach(r => {
       const card = document.getElementById(`card-${r.id}`);
       container.appendChild(card);
@@ -557,7 +801,6 @@ function toggleSort() {
 function renderReports(reports, searchMode = false) {
   const container = document.getElementById('reports-container');
   container.innerHTML = '';
-  document.getElementById('add-form-container').style.display = 'none';
   const copyBtn = document.getElementById('copy-selected-btn');
   if (copyBtn) copyBtn.disabled = true;
   if (reports.length === 0) {
@@ -572,20 +815,35 @@ function buildCard(report, showDate = false) {
   card.className = 'report-card';
   card.id = `card-${report.id}`;
 
-  let bodyHtml = '';
-  if (showDate) bodyHtml += `<div class="search-date-tag">${report.date}</div>`;
-  bodyHtml += '<div class="report-fields">';
+  // 欄位名與值常是 WAF payload 原文，一律走 textContent
+  const body = document.createElement('div');
+  body.className = 'card-body';
+  if (showDate) {
+    const tag = document.createElement('div');
+    tag.className = 'search-date-tag';
+    tag.textContent = report.date;
+    body.appendChild(tag);
+  }
+  const fieldsEl = document.createElement('div');
+  fieldsEl.className = 'report-fields';
   report.field_order.forEach(k => {
-    bodyHtml += `<span class="field-label">${k}</span><span class="field-value">${report.fields[k] ?? ''}</span>`;
+    const label = document.createElement('span');
+    label.className = 'field-label';
+    label.textContent = k;
+    const value = document.createElement('span');
+    value.className = 'field-value';
+    value.textContent = report.fields[k] ?? '';
+    fieldsEl.append(label, value);
   });
-  bodyHtml += '</div>';
-  bodyHtml += `<div class="card-actions">
-    <button class="btn btn-secondary btn-sm" onclick="copyReport(${report.id})">複製</button>
-    <button class="btn btn-secondary btn-sm" onclick="editReport(${report.id})">編輯</button>
-    <button class="btn btn-danger btn-sm" onclick="deleteReport(${report.id})">刪除</button>
-  </div>`;
-
-  card.innerHTML = `<div class="card-body">${bodyHtml}</div>`;
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+  actions.append(
+    makeButton('btn btn-secondary btn-sm', '複製', () => copyReport(report.id)),
+    makeButton('btn btn-secondary btn-sm', '編輯', () => editReport(report.id)),
+    makeButton('btn btn-danger btn-sm', '刪除', () => deleteReport(report.id))
+  );
+  body.append(fieldsEl, actions);
+  card.appendChild(body);
 
   if (!showDate) {
     const zone = document.createElement('div');
@@ -597,7 +855,17 @@ function buildCard(report, showDate = false) {
   }
 
   card._report = report;
+  card._showDate = showDate;
   return card;
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('已成功複製');
+  } catch (e) {
+    showToast(`複製失敗：${e.message}`, 'error');
+  }
 }
 
 function formatReport(report) {
@@ -606,8 +874,7 @@ function formatReport(report) {
 
 async function copyReport(id) {
   const card = document.getElementById(`card-${id}`);
-  await navigator.clipboard.writeText(formatReport(card._report));
-  showToast('已成功複製');
+  await copyText(formatReport(card._report));
 }
 
 function toggleSelectZone(zone) {
@@ -635,68 +902,90 @@ async function copySelected() {
   const ids = new Set(selected.map(z => parseInt(z.dataset.id)));
   const reports = currentReports.filter(r => ids.has(r.id));
   const text = reports.map(r => formatReport(r)).join('\n\n\n');
-  await navigator.clipboard.writeText(text);
-  showToast('已成功複製');
+  await copyText(text);
+}
+
+// 卡片增減後同步標題、空狀態與複製鈕（不重抓整個日期，搜尋模式也不會被踢出）
+function refreshReportsMeta() {
+  const container = document.getElementById('reports-container');
+  if (!container.querySelector(':scope > .report-card')) {
+    container.innerHTML = '<div id="no-results">無通報紀錄</div>';
+  }
+  updateMainTitle();
+  updateCopyBtn();
 }
 
 async function deleteReport(id) {
   if (!confirm('確定要刪除這筆通報嗎？')) return;
-  await api('DELETE', `/api/reports/${id}`);
-  await selectDate(currentDate);
+  try {
+    await api('DELETE', `/api/reports/${id}`);
+  } catch (e) {
+    showToast(`刪除失敗：${e.message}`, 'error');
+    return;
+  }
+  currentReports = currentReports.filter(r => r.id !== id);
+  document.getElementById(`card-${id}`)?.remove();
+  refreshReportsMeta();
+  showToast('已刪除');
+  await loadDates();
+}
+
+function buildFieldRow(k, value, isDefault) {
+  const row = document.createElement('div');
+  row.className = 'field-row';
+  row.dataset.key = k;
+  row.innerHTML = `
+    <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
+    <span class="drag-handle" draggable="true">⠿</span>`;
+  if (isDefault) {
+    const label = document.createElement('span');
+    label.className = 'key-label';
+    label.textContent = k;
+    row.appendChild(label);
+  } else {
+    const keyInput = document.createElement('input');
+    keyInput.className = 'field-input key-input';
+    keyInput.placeholder = '欄位名稱';
+    keyInput.value = k;
+    row.appendChild(keyInput);
+  }
+  const valInput = document.createElement('input');
+  valInput.className = 'field-input val-input';
+  valInput.placeholder = '值';
+  valInput.value = value;
+  row.appendChild(valInput);
+  return row;
 }
 
 function buildFieldRows(fields, order, defaultKeys = []) {
-  return order.map((k, i) => {
-    const isDefault = defaultKeys.includes(k);
-    if (isDefault) {
-      return `
-        <div class="field-row" data-key="${k}">
-          <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
-          <span class="drag-handle" draggable="true">⠿</span>
-          <span class="key-label">${k}</span>
-          <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
-        </div>`;
-    }
-    return `
-      <div class="field-row" data-key="${k}">
-        <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
-        <span class="drag-handle" draggable="true">⠿</span>
-        <input class="field-input key-input" value="${k}" placeholder="欄位名稱">
-        <input class="field-input val-input" value="${fields[k] ?? ''}" placeholder="值">
-      </div>`;
-  }).join('');
+  return order.map(k => buildFieldRow(k, fields[k] ?? '', defaultKeys.includes(k)));
 }
 
 function addFieldRow(container) {
-  const row = document.createElement('div');
-  row.className = 'field-row';
-  row.innerHTML = `
-    <button class="btn btn-danger btn-sm" onclick="deleteFieldRow(this)">✕</button>
-    <span class="drag-handle" draggable="true">⠿</span>
-    <input class="field-input key-input" placeholder="欄位名稱">
-    <input class="field-input val-input" placeholder="值">`;
-  container.querySelector('.field-rows').appendChild(row);
+  container.querySelector('.field-rows').appendChild(buildFieldRow('', '', false));
   bindDrag(container);
 }
 
-
+// 欄位名重複時提示並回傳 null（否則後者會蓋掉前者，field_order 卻記兩次）
 function collectFormData(container) {
   const rows = container.querySelectorAll('.field-row');
   const fields = {}, order = [];
+  let duplicate = null;
   rows.forEach(r => {
     const keyInput = r.querySelector('.key-input');
     const keyLabel = r.querySelector('.key-label');
     const k = keyInput ? keyInput.value.trim() : (keyLabel ? keyLabel.textContent.trim() : '');
     const v = r.querySelector('.val-input').value.trim();
-    if (k) { fields[k] = v; order.push(k); }
+    if (!k) return;
+    if (order.includes(k)) { duplicate ??= k; return; }
+    fields[k] = v;
+    order.push(k);
   });
+  if (duplicate !== null) {
+    showToast(`欄位名稱重複：${duplicate}`, 'error');
+    return null;
+  }
   return { fields, field_order: order };
-}
-
-function updatePreview(container) {
-  const { fields, field_order } = collectFormData(container);
-  const preview = container.querySelector('.preview-area');
-  preview.textContent = field_order.map(k => `- ${k}：${fields[k] ?? ''}`).join('\n');
 }
 
 function deleteFieldRow(btn) {
@@ -725,35 +1014,41 @@ function buildForm(fields, order, onSave, onCancel, defaultKeys = []) {
   const div = document.createElement('div');
   div.className = 'form-container report-card';
   div.innerHTML = `
-    <style>
-      .field-row { display: grid; grid-template-columns: 32px 20px 1fr 3fr; gap: 6px; align-items: center; margin-bottom: 4px; }
-      .key-label { font-size: 17px; color: #cbd5e1; padding: 4px 8px; }
-      .drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
-      .form-container .form-label { font-size: 15px; color: #475569; margin-bottom: 4px; text-transform: uppercase; }
-    </style>
-    <div class="field-rows">${buildFieldRows(fields, order, defaultKeys)}</div>
+    <div class="field-rows"></div>
     <button class="btn btn-success btn-sm" style="margin-bottom:12px" onclick="addFieldRow(this.closest('.form-container'))">＋ 新增欄位</button>
     <div class="card-actions">
       <button class="btn btn-primary btn-sm save-btn">儲存</button>
       <button class="btn btn-secondary btn-sm cancel-btn">取消</button>
     </div>`;
-  div.querySelector('.save-btn').onclick = () => onSave(div);
+  div.querySelector('.field-rows').append(...buildFieldRows(fields, order, defaultKeys));
+  // 儲存期間鎖住按鈕，避免連點送出兩次
+  const saveBtn = div.querySelector('.save-btn');
+  saveBtn.onclick = async () => {
+    if (saveBtn.disabled) return;
+    saveBtn.disabled = true;
+    try {
+      await onSave(div);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  };
   div.querySelector('.cancel-btn').onclick = onCancel;
   bindDrag(div);
   return div;
 }
 
-function cancelForm() {
-  document.getElementById('add-form-container').style.display = 'none';
-  document.getElementById('add-form-container').innerHTML = '';
-}
+// 關閉動畫的 transitionend 監聽器會在重開後才觸發；用序號讓過期的監聽器失效
+let addModalCloseGen = 0;
 
 function closeAddModal() {
   const overlay = document.getElementById('add-modal-overlay');
   const modal = document.getElementById('add-modal');
+  if (modal.classList.contains('closing')) return;
+  const gen = ++addModalCloseGen;
   modal.classList.add('closing');
   overlay.classList.remove('open');
   modal.addEventListener('transitionend', () => {
+    if (gen !== addModalCloseGen) return;
     overlay.style.display = 'none';
     modal.style.display = 'none';
     modal.classList.remove('closing');
@@ -789,17 +1084,20 @@ function renderAddForm(template) {
     initFields,
     schemaFields,
     async (div) => {
-      const { fields, field_order } = collectFormData(div);
+      const data = collectFormData(div);
+      if (!data) return;
+      let created;
       try {
-        await api('POST', '/api/reports', { date: currentDate, fields, field_order });
-        closeAddModal();
-        showToast('已成功儲存');
-        await selectDate(currentDate);
-        const newCard = document.querySelector('#reports-container .report-card');
-        if (newCard) newCard.classList.add('card-slide-in');
+        created = await api('POST', '/api/reports', { date: currentDate, ...data });
       } catch (e) {
         showToast(`儲存失敗：${e.message}`, 'error');
+        return;
       }
+      closeAddModal();
+      showToast('已成功儲存');
+      await loadDates();
+      await selectDate(currentDate);
+      document.getElementById(`card-${created.id}`)?.classList.add('card-slide-in');
     },
     closeAddModal,
     schemaFields
@@ -810,13 +1108,28 @@ function renderAddForm(template) {
 function openAddForm() {
   const overlay = document.getElementById('add-modal-overlay');
   const modal = document.getElementById('add-modal');
+  addModalCloseGen++;
+  modal.classList.remove('closing');
   renderAddForm('general');
   overlay.style.display = 'block';
   modal.style.display = 'block';
   requestAnimationFrame(() => overlay.classList.add('open'));
 }
 
+// 取消／儲存都只原地替換這張卡片，不重抓日期，搜尋結果也保留
+function restoreCard(card, report) {
+  card.replaceWith(buildCard(report, card._showDate));
+  updateCopyBtn();
+}
+
 function editReport(id) {
+  // 一次只允許一張卡片在編輯，避免另一張未存的修改被默默丟掉
+  const editing = document.querySelector('#reports-container > .report-card.editing');
+  if (editing) {
+    if (editing.id === `card-${id}`) return;
+    if (!confirm('另一筆通報正在編輯，要放棄它未儲存的修改嗎？')) return;
+    restoreCard(editing, editing._report);
+  }
   const card = document.getElementById(`card-${id}`);
   const report = card._report;
   card.classList.add('editing');
@@ -825,16 +1138,20 @@ function editReport(id) {
     report.fields,
     report.field_order,
     async (div) => {
-      const { fields, field_order } = collectFormData(div);
+      const data = collectFormData(div);
+      if (!data) return;
+      let updated;
       try {
-        await api('PUT', `/api/reports/${id}`, { fields, field_order });
-        showToast('已成功儲存');
-        await selectDate(currentDate);
+        updated = await api('PUT', `/api/reports/${id}`, data);
       } catch (e) {
         showToast(`儲存失敗：${e.message}`, 'error');
+        return;
       }
+      currentReports = currentReports.map(r => (r.id === id ? updated : r));
+      restoreCard(card, updated);
+      showToast('已成功儲存');
     },
-    async () => { await selectDate(currentDate); }
+    () => restoreCard(card, report)
   );
   card.appendChild(form);
 }
@@ -847,9 +1164,15 @@ function toggleSidebar() {
   document.getElementById('sidebar-toggle').title = collapsed ? '展開側邊欄' : '收合側邊欄';
 }
 
-init();
+document.getElementById('search-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+// toast 容器與抽屜在 script 之後才出現；等 DOM 解析完再啟動，init 立刻失敗時才有地方顯示錯誤
+document.addEventListener('DOMContentLoaded', init);
 </script>
 <script src="ip-lookup.js"></script>
+<script src="settings.js"></script>
 <div id="drawer-overlay" onclick="closeSchemaDrawer()"></div>
 <div id="schema-drawer">
   <div id="schema-drawer-header">
@@ -858,7 +1181,7 @@ init();
   </div>
   <div id="schema-drawer-content"></div>
   <div id="schema-drawer-footer">
-    <button class="btn btn-primary btn-sm" onclick="saveSchema()">儲存</button>
+    <button id="schema-save-btn" class="btn btn-primary btn-sm" onclick="saveSchema()">儲存</button>
     <button class="btn btn-secondary btn-sm" onclick="closeSchemaDrawer()">取消</button>
   </div>
 </div>

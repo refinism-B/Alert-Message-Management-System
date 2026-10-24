@@ -2,19 +2,91 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from typing import Literal, Optional
+import ipaddress
+import json
 import os
 
 import database
 import lookup
 import models
 import postprocess
+import settings_store
 
-app = FastAPI()
 
-database.init_db()
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    database.init_db()
+    yield
+
+
+# 關閉 /docs、/redoc、/openapi.json：Swagger UI 從 CDN 載入腳本，會在同源下執行
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+# 服務無認證、只綁本機；限制 Host 以防 DNS rebinding。
+# 測試以 ALLOWED_HOSTS 環境變數（逗號分隔）追加 testserver，正式環境不帶。
+_extra_hosts = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", *_extra_hosts])
+
+# 瀏覽器發出的跨站請求會帶 Sec-Fetch-Site: cross-site／same-site；curl 等非瀏覽器
+# 用戶端不帶此標頭。擋下跨站請求，避免其他網站用使用者的金鑰刷 VT 配額或 LLM 費用。
+_ALLOWED_FETCH_SITES = {"same-origin", "none"}
+
+
+def _is_loopback(host) -> bool:
+    """用 ipaddress 判斷：IPv4-mapped IPv6 先還原成 IPv4，再看 is_loopback。
+    無法解析的 host（例如 testclient）一律拒絕。"""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback
+
+
+def _cross_site_rejection(request: Request) -> Optional[JSONResponse]:
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return None
+    site = request.headers.get("sec-fetch-site")
+    if site is not None and site.lower() not in _ALLOWED_FETCH_SITES:
+        return JSONResponse({"detail": "不允許跨站請求"}, status_code=403)
+    # 寫入設定的端點另外限定來源為本機，即使有人把 host 改成 0.0.0.0 區網也不能改
+    if path.startswith("/api/settings") and request.method not in ("GET", "HEAD", "OPTIONS"):
+        host = request.client.host if request.client else None
+        if not _is_loopback(host):
+            return JSONResponse({"detail": "設定只能從本機修改"}, status_code=403)
+    return None
+
+
+@app.middleware("http")
+async def block_cross_site(request: Request, call_next):
+    response = _cross_site_rejection(request) or await call_next(request)
+    # 防 clickjacking（含 403 與靜態檔）：只加 frame-ancestors，不加其他 CSP 指令以免弄壞現有頁面
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    """設定端點的 422 預設會在 detail[].input 原樣回傳送出的值（即金鑰），
+    前端又會顯示在 DOM 上。該路徑下移除 input、ctx；其他路徑維持 FastAPI 預設格式。"""
+    if request.url.path.startswith("/api/settings/"):
+        errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.get("/api/dates")
@@ -23,7 +95,7 @@ def get_dates() -> list[str]:
 
 
 @app.get("/api/reports")
-def get_reports(date: str) -> list[models.ReportResponse]:
+def get_reports(date: models.DateStr) -> list[models.ReportResponse]:
     return database.get_reports_by_date(date)
 
 
@@ -48,7 +120,8 @@ def update_report(report_id: int, body: models.ReportUpdate) -> models.ReportRes
 
 @app.delete("/api/reports/{report_id}")
 def delete_report(report_id: int) -> dict:
-    database.delete_report(report_id)
+    if not database.delete_report(report_id):
+        raise HTTPException(status_code=404, detail="Report not found")
     return {"ok": True}
 
 
@@ -65,8 +138,8 @@ def update_schema(body: models.SchemaUpdate, template: Literal["general", "waf"]
 @app.get("/api/search")
 def search(
     q: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    date_from: Optional[models.DateStr] = None,
+    date_to: Optional[models.DateStr] = None,
 ) -> models.SearchResult:
     reports = database.search_reports(q, date_from, date_to)
     return {"reports": reports}
@@ -88,38 +161,105 @@ def lookup_rdap(target: str) -> models.RdapLookupResponse:
         raise HTTPException(status_code=502, detail=str(e))
 
 
+def _resolve_key(kind: str) -> Optional[str]:
+    try:
+        return settings_store.get_key(kind)
+    except settings_store.KeyringUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @app.get("/api/lookup/vt")
 def lookup_vt(target: str) -> models.VtLookupResponse:
-    api_key = os.environ.get("VT_API_KEY")
+    api_key = _resolve_key("vt")
     if not api_key:
-        raise HTTPException(status_code=503, detail="請設定 VT_API_KEY")
+        raise HTTPException(status_code=503, detail="請設定 VT_API_KEY（.env 或於設定頁輸入）")
     try:
         return _with_view(lookup.query_virustotal(target, api_key))
     except lookup.UnsupportedTargetError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except lookup.LookupFailedError as e:
-        raise HTTPException(status_code=502, detail=str(e))
     except lookup.VtQueryError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+# 實測完整的 VT 回應約 100KB，2MB 是寬鬆的上限。rdap／vt 是任意 dict，不設限的話
+# 一個大 payload 就會變成大量 input tokens（花使用者的額度）或拖慢後處理。
+MAX_LOOKUP_PAYLOAD_BYTES = 2 * 1024 * 1024
+
+
+def _check_payload_size(**payloads: Optional[dict]) -> None:
+    for name, payload in payloads.items():
+        if payload is None:
+            continue
+        size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        if size > MAX_LOOKUP_PAYLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{name} 資料過大（{size:,} bytes，上限 {MAX_LOOKUP_PAYLOAD_BYTES:,} bytes）")
 
 
 @app.post("/api/lookup/compare")
 def lookup_compare(body: models.CompareRequest) -> models.CompareResponse:
     """跨來源比對。比對的是正規化後的語意事實，不是欄位路徑——RDAP、WHOIS 備援、
     VirusTotal 屬性與其內嵌的 raw RDAP 四者結構差異太大，路徑映射表撐不住。"""
+    _check_payload_size(rdap=body.rdap, vt=body.vt)
     return postprocess.compare_sources(body.rdap, body.vt)
+
+
 
 
 @app.post("/api/lookup/analyze")
 def lookup_analyze(body: models.AnalyzeRequest) -> models.AnalyzeResponse:
-    api_key = os.environ.get("LLM_API_KEY")
+    _check_payload_size(rdap=body.rdap, vt=body.vt)
+    api_key = _resolve_key("llm")
     if not api_key:
-        raise HTTPException(status_code=503, detail="請設定 LLM_API_KEY")
-    model = os.environ.get("LLM_MODEL", "claude-sonnet-5")
+        raise HTTPException(status_code=503, detail="請設定 LLM_API_KEY（.env 或於設定頁輸入）")
+    model, _ = settings_store.get_model()
     try:
         return lookup.analyze_with_llm(body.target, body.rdap, body.vt, api_key, model)
+    except lookup.UnsupportedTargetError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except lookup.LlmQueryError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+def _kind_or_404(kind: str) -> str:
+    if kind not in settings_store.KEY_NAMES:
+        raise HTTPException(status_code=404, detail="未知的金鑰類型")
+    return kind
+
+
+def _settings_call(fn, *args):
+    """把 settings_store 的例外對應成 HTTP 狀態；訊息本身已不含金鑰。"""
+    try:
+        return fn(*args)
+    except settings_store.SourceLockedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except settings_store.ValidationFailedError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except settings_store.KeyringUnavailableError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/api/settings")
+def get_settings() -> models.SettingsResponse:
+    return settings_store.get_status()
+
+
+@app.put("/api/settings/keys/{kind}")
+def put_key(kind: str, body: models.KeyUpdate) -> models.KeyStatus:
+    return _settings_call(settings_store.set_key, _kind_or_404(kind), body.value)
+
+
+@app.delete("/api/settings/keys/{kind}")
+def delete_key(kind: str) -> models.KeyStatus:
+    return _settings_call(settings_store.delete_key, _kind_or_404(kind))
+
+
+@app.put("/api/settings/model")
+def put_model(body: models.ModelUpdate) -> models.ModelStatus:
+    if body.model not in settings_store.ALLOWED_MODELS:
+        raise HTTPException(status_code=422, detail="不支援的模型")
+    return _settings_call(settings_store.set_model, body.model)
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -133,7 +273,7 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 
-app.mount("/", NoCacheStaticFiles(directory="static", html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=database.BASE_DIR / "static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

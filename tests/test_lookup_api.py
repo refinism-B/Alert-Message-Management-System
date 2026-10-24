@@ -65,16 +65,14 @@ def test_lookup_vt_rate_limited_returns_429(client, monkeypatch):
     assert r.status_code == 429
 
 
-def test_lookup_vt_invalid_domain_returns_502(client, monkeypatch):
+def test_lookup_vt_invalid_domain_returns_400(client, monkeypatch):
+    """使用者打錯字是輸入問題（400），不是上游服務失敗（502）。"""
     monkeypatch.setenv("VT_API_KEY", "test-key")
-
-    def raise_invalid_domain(target, api_key):
-        raise lookup.LookupFailedError("無效的查詢目標：domain 語法不合法")
-
-    monkeypatch.setattr(lookup, "query_virustotal", raise_invalid_domain)
+    monkeypatch.setattr(lookup.httpx, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no network call")))
     r = client.get("/api/lookup/vt?target=invalid..domain")
-    assert r.status_code == 502
-    assert "語法不合法" in r.json()["detail"]
+    assert r.status_code == 400
+    assert "invalid..domain" in r.json()["detail"]
 
 
 def test_lookup_analyze_missing_api_key_returns_503(client, monkeypatch):
@@ -86,6 +84,7 @@ def test_lookup_analyze_missing_api_key_returns_503(client, monkeypatch):
 
 def test_lookup_analyze_success(client, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.delenv("LLM_MODEL", raising=False)  # .env 可能有設；這裡驗的是程式預設值
     monkeypatch.setattr(
         lookup, "analyze_with_llm",
         lambda target, rdap, vt, api_key, model: {
@@ -97,7 +96,7 @@ def test_lookup_analyze_success(client, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["target"] == "8.8.8.8"
-    assert body["model"] == "claude-sonnet-5"
+    assert body["model"] == "claude-sonnet-5-5"
 
 
 def test_lookup_analyze_llm_error_returns_mapped_status(client, monkeypatch):
@@ -110,3 +109,100 @@ def test_lookup_analyze_llm_error_returns_mapped_status(client, monkeypatch):
     r = client.post("/api/lookup/analyze", json={"target": "8.8.8.8", "rdap": {}, "vt": {}})
     assert r.status_code == 429
     assert "429" in r.json()["detail"]
+
+
+def test_lookup_rdap_private_ip_returns_400(client, monkeypatch):
+    monkeypatch.setattr(lookup.whoisit, "ip",
+                        lambda t: (_ for _ in ()).throw(AssertionError("no network call")))
+    r = client.get("/api/lookup/rdap?target=192.168.1.10")
+    assert r.status_code == 400
+    assert r.json()["detail"] == lookup.NON_PUBLIC_MESSAGE
+
+
+def test_lookup_rdap_scoped_ipv6_returns_400(client):
+    r = client.get("/api/lookup/rdap", params={"target": "fe80::1%eth0"})
+    assert r.status_code == 400
+
+
+def test_lookup_vt_timeout_returns_504(client, monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "test-key")
+
+    def timeout(*args, **kwargs):
+        raise lookup.httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(lookup.httpx, "get", timeout)
+    r = client.get("/api/lookup/vt?target=8.8.8.8")
+    assert r.status_code == 504
+
+
+def test_lookup_vt_reports_cache_status(client, monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "test-key")
+
+    class _Response:
+        status_code = 200
+        reason_phrase = "OK"
+
+        def json(self):
+            return {"data": {"id": "8.8.8.8", "attributes": {}}}
+
+    monkeypatch.setattr(lookup.httpx, "get", lambda *a, **k: _Response())
+    first = client.get("/api/lookup/vt?target=8.8.8.8").json()
+    second = client.get("/api/lookup/vt?target=8.8.8.8").json()
+    assert first["cached"] is False and first["cached_at"] is None
+    assert second["cached"] is True and second["cached_at"]
+    assert second["queried_at"] == first["queried_at"]
+
+
+def test_lookup_rdap_idn_keeps_input(client, monkeypatch):
+    monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
+    monkeypatch.setattr(lookup.whoisit, "domain", lambda t: {"name": t, "url": ""})
+    body = client.get("/api/lookup/rdap", params={"target": "例子.台灣"}).json()
+    assert body["target"] == "xn--fsqu00a.xn--kpry57d"
+    assert body["input_target"] == "例子.台灣"
+
+
+@pytest.mark.parametrize("payload", [
+    {"rdap": {"target": "1.1.1.1", "source": "RDAP", "data": [1]}, "vt": None},
+    {"rdap": None, "vt": {"target": "1.1.1.1", "source": "VirusTotal", "data": {"data": [1]}}},
+    {"rdap": {"target": 123, "source": "RDAP", "data": "x"}, "vt": {"data": "y"}},
+])
+def test_lookup_compare_malformed_body_does_not_500(client, payload):
+    r = client.post("/api/lookup/compare", json=payload)
+    assert r.status_code == 200
+
+
+def test_lookup_analyze_non_public_target_returns_400(client, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    r = client.post("/api/lookup/analyze", json={"target": "10.0.0.1", "rdap": None, "vt": None})
+    assert r.status_code == 400
+    assert r.json()["detail"] == lookup.NON_PUBLIC_MESSAGE
+
+
+def _oversized_payload():
+    import main
+    return {"target": "8.8.8.8", "source": "RDAP", "data": {"blob": "x" * (main.MAX_LOOKUP_PAYLOAD_BYTES + 1)}}
+
+
+def test_lookup_analyze_oversized_payload_returns_413(client, monkeypatch):
+    """rdap／vt 是任意 dict；不設上限的話一個大 payload 就變成大量 input tokens。"""
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setattr(lookup, "analyze_with_llm",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("不得呼叫 LLM")))
+    r = client.post("/api/lookup/analyze", json={"target": "8.8.8.8", "rdap": None, "vt": _oversized_payload()})
+    assert r.status_code == 413
+    assert "vt" in r.json()["detail"]
+
+
+def test_lookup_compare_oversized_payload_returns_413(client):
+    r = client.post("/api/lookup/compare", json={"rdap": _oversized_payload(), "vt": None})
+    assert r.status_code == 413
+
+
+def test_real_vt_result_is_well_under_payload_limit():
+    import json
+    import pathlib
+
+    import main
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "vt_ip_full.json"
+    assert len(fixture.read_bytes()) < main.MAX_LOOKUP_PAYLOAD_BYTES / 10
+    assert json.loads(fixture.read_text(encoding="utf-8"))["source"]
