@@ -686,19 +686,32 @@ _PYWHOIS_RELIABILITY_WARNING = (
 )
 
 
+def _first_flat_value(builder: ViewBuilder, key: str) -> tuple[str, Any]:
+    """取攤平結果中 key 的值；若是 list 則取第一個元素（路徑 key[0]）。"""
+    if key in builder.flat:
+        return key, builder.flat[key]
+    indexed = f"{key}[0]"
+    if indexed in builder.flat:
+        return indexed, builder.flat[indexed]
+    return key, None
+
+
 def _build_pywhois_view(result: dict, builder: ViewBuilder, now: Optional[datetime]) -> None:
     builder.warn(_PYWHOIS_RELIABILITY_WARNING)
 
-    builder.add_summary("網域名稱", builder.get("domain_name"), path="domain_name",
+    # python-whois 常把這幾個欄位回成 list（攤平後路徑是 key[0]、key[1]），取第一筆；
+    # path 也要指向實際用到的元素，明細區才會正確標記為已消耗。
+    domain_path, domain_name = _first_flat_value(builder, "domain_name")
+    builder.add_summary("網域名稱", domain_name, path=domain_path,
                         note="WHOIS 備援解析結果，可信度低於 RDAP。", tone="warn")
     builder.add_summary("註冊商", builder.get("registrar"), path="registrar")
     for label, key, is_expiry in (("建立時間", "creation_date", False),
                                   ("最後異動時間", "updated_date", False),
                                   ("到期時間", "expiration_date", True)):
-        raw_value = builder.get(key)
+        value_path, raw_value = _first_flat_value(builder, key)
         described = describe_time(raw_value, key, is_expiry=is_expiry, now=now)
         tone = "risk" if (is_expiry and described and "已過期" in described) else None
-        builder.add_summary(label, raw_value, path=key, text=described, tone=tone)
+        builder.add_summary(label, raw_value, path=value_path, text=described, tone=tone)
     _add_domain_age(builder, (result.get("data") or {}).get("creation_date"), "creation_date",
                     "creation_date", now)
     builder.add_summary("註冊人組織", builder.get("registrant_organization"),
@@ -1632,7 +1645,7 @@ def _range_to_cidr(start: str, end: str) -> Optional[str]:
     try:
         networks = list(ipaddress.summarize_address_range(
             ipaddress.ip_address(start.strip()), ipaddress.ip_address(end.strip())))
-    except ValueError:
+    except (ValueError, TypeError):  # TypeError：起訖位址的 IP 版本不同
         return None
     return "; ".join(str(n) for n in networks) if networks else None
 
@@ -1759,7 +1772,9 @@ def _display_fact(key: str, value: Any, now: Optional[datetime]) -> str:
     if is_empty(value):
         return "資料未提供"
     if key == "registration_date":
-        return describe_time(value, "registration_date", now=now) or to_text(value)
+        # 與 _normalize_fact 一致：VT 的註冊日期是 creation_date 這個 epoch 欄位
+        return (describe_time(value, "registration_date", now=now)
+                or describe_time(value, "creation_date", now=now) or to_text(value))
     return to_text(value)
 
 
@@ -1822,6 +1837,20 @@ def collect_sources(rdap_result: Optional[dict], vt_result: Optional[dict]) -> l
 
 def compare_sources(rdap_result: Optional[dict], vt_result: Optional[dict],
                     now: Optional[datetime] = None) -> dict:
+    """fail-safe 外殼：比對規則出錯不得讓 /api/lookup/compare 回 500，
+    退回空的比對結果並附上告警（比照 process() 的精神）。"""
+    try:
+        return _compare_sources(rdap_result, vt_result, now)
+    except Exception as e:  # noqa: BLE001 - fail-soft 是刻意的
+        return {
+            "target": "", "sources": [], "rows": [], "headline": None,
+            "summary": {"agree": 0, "conflict": 0, "source_count": 0, "primary_count": 0},
+            "warnings": [f"跨來源比對失敗，已略過：{type(e).__name__}: {e}"],
+        }
+
+
+def _compare_sources(rdap_result: Optional[dict], vt_result: Optional[dict],
+                     now: Optional[datetime] = None) -> dict:
     """跨來源比對。一致的只顯示一次，不一致的並陳雙方數值供人工判斷。
 
     不一致不等於有一方錯：VT 的內嵌快照有時間差，whois 原文可能描述上層委派區塊。

@@ -107,20 +107,36 @@ def init_db() -> None:
         else:
             # One-time migration: schemas seeded before 觸發規則 existed lack it
             fields = json.loads(exists["fields"])
+            changed = False
+            # 舊安裝的 schema 可能沒有 Offense ID，而 SchemaUpdate 強制要求它，
+            # 不補回的話之後永遠存不了；補在最前面（與預設 schema 一致）。
+            if "Offense ID" not in fields:
+                fields.insert(0, "Offense ID")
+                changed = True
             if "觸發規則" not in fields:
-                anchor = fields.index("Offense ID") + 1 if "Offense ID" in fields else 1
+                anchor = fields.index("Offense ID") + 1
                 fields.insert(anchor, "觸發規則")
+                changed = True
+            if changed:
                 conn.execute(
                     "UPDATE field_schema SET fields = ?, updated_at = ? WHERE id = 1",
                     (json.dumps(fields, ensure_ascii=False), _now()),
                 )
 
-        waf_exists = conn.execute("SELECT id FROM field_schema WHERE id = 2").fetchone()
+        waf_exists = conn.execute("SELECT id, fields FROM field_schema WHERE id = 2").fetchone()
         if not waf_exists:
             conn.execute(
                 "INSERT INTO field_schema (id, fields, updated_at) VALUES (2, ?, ?)",
                 (json.dumps(DEFAULT_FIELDS_WAF, ensure_ascii=False), _now()),
             )
+        else:
+            waf_fields = json.loads(waf_exists["fields"])
+            if "Offense ID" not in waf_fields:
+                waf_fields.insert(0, "Offense ID")
+                conn.execute(
+                    "UPDATE field_schema SET fields = ?, updated_at = ? WHERE id = 2",
+                    (json.dumps(waf_fields, ensure_ascii=False), _now()),
+                )
 
         _ensure_indexes(conn)
 

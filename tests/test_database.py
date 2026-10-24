@@ -54,9 +54,9 @@ def test_update_schema_waf_template_isolated_from_general():
     assert database.get_schema("general")["fields"] == database.DEFAULT_FIELDS
 
 def test_init_db_does_not_overwrite_existing_waf_schema():
-    database.update_schema(["使用者自訂"], template="waf")
+    database.update_schema(["Offense ID", "使用者自訂"], template="waf")
     database.init_db()
-    assert database.get_schema("waf")["fields"] == ["使用者自訂"]
+    assert database.get_schema("waf")["fields"] == ["Offense ID", "使用者自訂"]
 
 def test_create_and_get_report():
     report = database.create_report(
@@ -174,3 +174,14 @@ def test_update_report_same_offense_id_allowed():
     r = database.create_report("2026-06-06", {"Offense ID": "SELF-001"}, ["Offense ID"])
     updated = database.update_report(r["id"], {"Offense ID": "SELF-001", "time": "new"}, ["Offense ID", "time"])
     assert updated["fields"]["time"] == "new"
+
+
+def test_init_db_restores_missing_offense_id_in_both_schemas():
+    database.update_schema(["時間", "方向"], template="general")
+    database.update_schema(["時間", "severity"], template="waf")
+    database.init_db()
+    assert database.get_schema("general")["fields"] == ["Offense ID", "觸發規則", "時間", "方向"]
+    assert database.get_schema("waf")["fields"] == ["Offense ID", "時間", "severity"]
+    # 補回後可經 API 的驗證規則再次儲存
+    import models
+    models.SchemaUpdate(fields=database.get_schema("general")["fields"])

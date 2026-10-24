@@ -280,6 +280,22 @@ def test_env_model_is_readonly_and_unlisted_value_used(client, monkeypatch):
     assert client.put("/api/settings/model", json={"model": "claude-haiku-5-5"}).status_code == 409
 
 
+def test_empty_env_model_is_treated_as_unset(client, monkeypatch):
+    """.env.example 的 LLM_MODEL= 留空時，前端模型選單必須可修改。"""
+    monkeypatch.setenv("LLM_MODEL", "")
+    m = client.get("/api/settings").json()["model"]
+    assert m["source"] == "default"
+    assert client.put("/api/settings/model", json={"model": "claude-haiku-5-5"}).status_code == 200
+    assert settings_store.get_model() == ("claude-haiku-5-5", "ui")
+
+
+def test_env_example_does_not_prefill_model():
+    import database
+    lines = (database.BASE_DIR / ".env.example").read_text(encoding="utf-8").splitlines()
+    prefilled = [l for l in lines if l.startswith("LLM_MODEL=") and l.split("=", 1)[1].strip()]
+    assert prefilled == []
+
+
 def test_settings_file_follows_base_dir(monkeypatch, tmp_path):
     import database
     monkeypatch.undo()  # 取消 conftest 的路徑覆寫，改測以 BASE_DIR 為基準的預設路徑

@@ -349,8 +349,10 @@ def _fetch_virustotal(target: str, raw_input: str, target_type: str, api_key: st
     except httpx.RequestError as e:
         raise VtQueryError(502, f"無法連線至 VirusTotal：{type(e).__name__}") from e
     if response.status_code != 200:
+        # 只有 4xx／5xx 原樣轉出；204、301 等轉成 502，否則前端 res.ok 為真卻解析不到 JSON
+        status = response.status_code if 400 <= response.status_code <= 599 else 502
         raise VtQueryError(
-            response.status_code,
+            status,
             f"VirusTotal 查詢失敗：{response.status_code} {response.reason_phrase}",
         )
     try:

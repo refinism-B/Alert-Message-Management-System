@@ -197,6 +197,74 @@ def _check_payload_size(**payloads: Optional[dict]) -> None:
                 detail=f"{name} 資料過大（{size:,} bytes，上限 {MAX_LOOKUP_PAYLOAD_BYTES:,} bytes）")
 
 
+# 整個 request body 的上限：rdap 與 vt 兩份各可到 MAX_LOOKUP_PAYLOAD_BYTES，
+# 再加 target 與 JSON 外層結構的餘裕。這道關卡在 JSON 解析「之前」，擋住記憶體與解析成本；
+# 上面逐欄位的檢查保留，用來擋單一來源過大。
+MAX_LOOKUP_BODY_BYTES = 2 * MAX_LOOKUP_PAYLOAD_BYTES + 64 * 1024
+_BODY_LIMITED_PATHS = {"/api/lookup/compare", "/api/lookup/analyze"}
+
+
+class BodySizeLimitMiddleware:
+    """純 ASGI middleware：先看 Content-Length，超過直接 413；沒有（chunked）時
+    邊讀邊計數，超過就停止讀取並回 413。未超限才把已讀的內容重放給後面的 app。"""
+
+    def __init__(self, app, max_bytes: int = MAX_LOOKUP_BODY_BYTES):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def _reject(self, send) -> None:
+        body = json.dumps(
+            {"detail": f"請求內容過大（上限 {self.max_bytes:,} bytes）"}, ensure_ascii=False
+        ).encode("utf-8")
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] != "http" or scope["method"] != "POST"
+                or scope["path"] not in _BODY_LIMITED_PATHS):
+            await self.app(scope, receive, send)
+            return
+
+        for name, value in scope["headers"]:
+            if name == b"content-length":
+                try:
+                    declared = int(value)
+                except ValueError:
+                    break  # 無效值：退回逐塊計數
+                if declared > self.max_bytes:
+                    await self._reject(send)
+                    return
+                break
+
+        messages, total = [], 0
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] == "http.disconnect":
+                return
+            total += len(message.get("body", b""))
+            if total > self.max_bytes:
+                await self._reject(send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        replay = iter(messages)
+
+        async def replay_receive():
+            try:
+                return next(replay)
+            except StopIteration:
+                return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
+app.add_middleware(BodySizeLimitMiddleware)
+
+
 @app.post("/api/lookup/compare")
 def lookup_compare(body: models.CompareRequest) -> models.CompareResponse:
     """跨來源比對。比對的是正規化後的語意事實，不是欄位路徑——RDAP、WHOIS 備援、

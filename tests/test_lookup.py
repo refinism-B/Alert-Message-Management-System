@@ -281,6 +281,18 @@ def test_query_virustotal_rate_limited_raises_with_status(monkeypatch):
     assert "429" in str(exc_info.value)
 
 
+@pytest.mark.parametrize("code, expected", [
+    (204, 502), (301, 502), (302, 502), (404, 404), (429, 429), (503, 503),
+])
+def test_query_virustotal_non_error_non_200_maps_to_502(monkeypatch, code, expected):
+    """204／301 等原樣轉出的話，前端 res.ok 為真卻解析不到 JSON。"""
+    monkeypatch.setattr(lookup.httpx, "get",
+                        lambda url, headers=None, timeout=None: _FakeResponse(code))
+    with pytest.raises(lookup.VtQueryError) as exc_info:
+        lookup.query_virustotal("example.com", "test-key")
+    assert exc_info.value.status_code == expected
+
+
 @pytest.mark.parametrize("error, status", [
     (lookup.httpx.ReadTimeout("timed out"), 504),
     (lookup.httpx.ConnectTimeout("timed out"), 504),
@@ -675,6 +687,22 @@ def test_fallback_models_use_server_side_fallback(monkeypatch):
     assert captured[0]["model"] == "claude-sonnet-5-5"
     assert captured[0]["fallbacks"] == "default"
     assert captured[0]["betas"] == ["server-side-fallback-2026-07-01"]
+    assert captured[0]["output_config"] == {"effort": "medium"}
+
+
+def test_haiku_skips_server_side_fallback_but_keeps_effort(monkeypatch):
+    """Haiku 5.5 沒有伺服端 fallback（文件建議不要送 fallbacks），但支援 effort。"""
+    captured = []
+
+    class _Client:
+        def __init__(self, api_key):
+            self.beta = None  # 走到 beta 路徑會 AttributeError
+            self.messages = _FakeMessages(_report_with_sections(), captured)
+
+    monkeypatch.setattr(lookup.anthropic, "Anthropic", lambda api_key, **_: _Client(api_key))
+    lookup.analyze_with_llm("1.2.3.4", None, None, "fake-key", "claude-haiku-5-5")
+    assert "fallbacks" not in captured[0]
+    assert "betas" not in captured[0]
     assert captured[0]["output_config"] == {"effort": "medium"}
 
 

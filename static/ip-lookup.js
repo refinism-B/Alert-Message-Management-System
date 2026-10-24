@@ -456,7 +456,7 @@
       const res = await fetch('/api/lookup/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rdap: lastRdapResult, vt: lastVtResult }),
+        body: JSON.stringify({ rdap: pickLookupFields(lastRdapResult), vt: pickLookupFields(lastVtResult) }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -624,6 +624,20 @@
       </div>`;
   }
 
+  // 送回後端前只留後端實際會讀的欄位：view 與 warnings 由後端重新計算，不必往返
+  // （會讓負載約變兩倍）。後端讀 target／type／source／queried_at／data；
+  // input_target、cached、cached_at 體積極小，保守起見一併保留。
+  const LOOKUP_ENVELOPE_KEYS = ['target', 'type', 'source', 'queried_at', 'data',
+                                'input_target', 'cached', 'cached_at'];
+  function pickLookupFields(result) {
+    if (!result || typeof result !== 'object') return result;
+    const picked = {};
+    for (const key of LOOKUP_ENVELOPE_KEYS) {
+      if (key in result) picked[key] = result[key];
+    }
+    return picked;
+  }
+
   window.ipLookupAnalyze = async function () {
     const target = lastQueryTarget;
     const gen = queryGen;
@@ -645,9 +659,9 @@
       const res = await fetch('/api/lookup/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // 送完整查詢結果而非只送 data：後端要靠 source 判斷是哪一套 schema
+        // 送查詢結果的信封而非只送 data：後端要靠 source 判斷是哪一套 schema
         // （whoisit / python-whois / VirusTotal），才能給 LLM 整理過的資料
-        body: JSON.stringify({ target, rdap: lastRdapResult, vt: lastVtResult }),
+        body: JSON.stringify({ target, rdap: pickLookupFields(lastRdapResult), vt: pickLookupFields(lastVtResult) }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

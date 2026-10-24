@@ -206,3 +206,47 @@ def test_real_vt_result_is_well_under_payload_limit():
     fixture = pathlib.Path(__file__).parent / "fixtures" / "vt_ip_full.json"
     assert len(fixture.read_bytes()) < main.MAX_LOOKUP_PAYLOAD_BYTES / 10
     assert json.loads(fixture.read_text(encoding="utf-8"))["source"]
+
+
+# ---------------------------------------------------------------------------
+# request body 大小上限（JSON 解析之前）
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", ["/api/lookup/compare", "/api/lookup/analyze"])
+def test_oversized_content_length_rejected_before_parsing(client, path):
+    """body 不是合法 JSON：若有進到解析會是 422，回 413 代表在解析前就被擋下。"""
+    import main
+    r = client.post(path, content=b"x" * (main.MAX_LOOKUP_BODY_BYTES + 1),
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 413
+    assert "請求內容過大" in r.json()["detail"]
+
+
+def test_oversized_chunked_body_rejected_without_content_length(client):
+    import main
+
+    def chunks():
+        for _ in range(main.MAX_LOOKUP_BODY_BYTES // 65536 + 2):
+            yield b"x" * 65536
+
+    r = client.post("/api/lookup/compare", content=chunks(),
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 413
+
+
+def test_body_limit_allows_two_payloads_under_per_field_cap(client):
+    """rdap 與 vt 各接近單欄上限時，加總超過 2 MB 也必須放行。"""
+    import main
+    blob = "x" * (main.MAX_LOOKUP_PAYLOAD_BYTES - 1024)
+    r = client.post("/api/lookup/compare", json={
+        "rdap": {"target": "8.8.8.8", "source": "RDAP", "data": {"blob": blob}},
+        "vt": {"target": "8.8.8.8", "source": "VirusTotal Public API v3", "data": {"blob": blob}},
+    })
+    assert r.status_code == 200
+
+
+def test_body_limit_only_applies_to_lookup_post_paths(client):
+    import main
+    r = client.put("/api/settings/model", content=b"x" * (main.MAX_LOOKUP_BODY_BYTES + 1),
+                   headers={"content-type": "application/json"})
+    assert r.status_code != 413

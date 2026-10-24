@@ -903,3 +903,55 @@ def test_llm_input_supplies_query_time_and_source(vt_ip):
     content = lookup._build_user_content("79.127.254.133", None, vt_ip)
     assert f"查詢時間：{vt_ip['queried_at']}" in content
     assert f"資料來源：{vt_ip['source']}" in content
+
+
+# ---------------------------------------------------------------------------
+# 合併前總 review 修補
+# ---------------------------------------------------------------------------
+
+def test_pywhois_summary_reads_list_valued_fields(whois_fallback):
+    """python-whois 常把 domain_name／日期回成 list，攤平後是 key[0]、key[1]。"""
+    result = copy.deepcopy(whois_fallback)
+    result["data"].update({
+        "domain_name": ["EXAMPLE.COM", "example.com"],
+        "creation_date": ["2020-01-01T00:00:00Z", "2020-01-02T00:00:00Z"],
+        "expiration_date": ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"],
+        "updated_date": ["2025-01-01T00:00:00Z", "2025-01-02T00:00:00Z"],
+    })
+    view = postprocess.process(result, now=NOW)["view"]
+    by_label = {row["label"]: row for row in view["summary"]}
+    assert by_label["網域名稱"]["value"] == "EXAMPLE.COM"
+    assert by_label["網域名稱"]["path"] == "domain_name[0]"
+    assert not by_label["建立時間"]["missing"]
+    assert "2020-01-01" in by_label["建立時間"]["value"]
+    assert not by_label["最後異動時間"]["missing"]
+    assert not by_label["到期時間"]["missing"]
+    assert by_label["到期時間"]["tone"] == "risk"  # NOW 已晚於到期日
+
+
+def test_display_fact_formats_vt_epoch_registration_date():
+    shown = postprocess._display_fact("registration_date", 820454400, NOW)
+    assert "1996-01-01" in shown
+
+
+def test_range_to_cidr_mixed_ip_versions_returns_none():
+    assert postprocess._range_to_cidr("1.2.3.0", "::ff") is None
+
+
+def test_compare_survives_mixed_version_whois_range():
+    vt = {"target": "1.2.3.4", "type": "ip", "source": "VirusTotal API v3",
+          "queried_at": "2026-09-12 12:00:00 (UTC+8)",
+          "data": {"data": {"attributes": {"whois": "inetnum: 1.2.3.0 - ::ff\norg-name: X"}}}}
+    result = postprocess.compare_sources(None, vt, now=NOW)
+    assert result["summary"]["source_count"] == 2
+    assert not any("比對失敗" in w for w in result["warnings"])  # 是 TypeError 被攔下，不是外殼兜底
+
+
+def test_compare_sources_fail_safe_on_unexpected_error(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("模擬規則出錯")
+
+    monkeypatch.setattr(postprocess, "collect_sources", boom)
+    result = postprocess.compare_sources({"data": {}}, None, now=NOW)
+    assert result["rows"] == []
+    assert result["warnings"] and "比對失敗" in result["warnings"][0]

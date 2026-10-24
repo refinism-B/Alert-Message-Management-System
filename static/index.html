@@ -713,11 +713,17 @@ function renderSchemaPanel() {
     input.style.flex = '1';
     input.value = f;
     input.oninput = () => { fields[i] = input.value; };
+    // Offense ID 是後端必保留的欄位（models.REQUIRED_SCHEMA_FIELDS）：不可改名、不可刪除
+    const locked = f === 'Offense ID';
+    if (locked) { input.readOnly = true; input.title = '必要欄位，不可修改或刪除'; }
     row.append(
       input,
       makeButton('btn btn-secondary btn-sm', '↑', () => schemaRowUp(i)),
-      makeButton('btn btn-danger btn-sm', '✕', () => { fields.splice(i, 1); renderSchemaPanel(); })
+      locked
+        ? makeButton('btn btn-danger btn-sm', '✕', () => {})
+        : makeButton('btn btn-danger btn-sm', '✕', () => { fields.splice(i, 1); renderSchemaPanel(); })
     );
+    if (locked) { const del = row.lastChild; del.disabled = true; del.title = '必要欄位，不可刪除'; }
     rows.appendChild(row);
   });
   const addRow = document.createElement('div');
