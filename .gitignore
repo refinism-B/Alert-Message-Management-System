@@ -13,10 +13,18 @@ env/
 .env
 .envcc
 
+# Env backups/variants may hold real keys; only the template is tracked
+.env.*
+!.env.example
+
 # pytest
 .pytest_cache/
 .coverage
 htmlcov/
+
+# caches and logs
+.mypy_cache/
+*.log
 
 # Runtime data
 data/
