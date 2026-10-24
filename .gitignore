@@ -11,6 +11,7 @@ env/
 .venv/
 .env/
 .env
+.envcc
 
 # pytest
 .pytest_cache/
@@ -37,3 +38,5 @@ Thumbs.db
 
 # Docs (development only)
 docs/
+
+.codegraph/
