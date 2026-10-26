@@ -55,6 +55,10 @@ def _is_loopback(host) -> bool:
     return ip.is_loopback
 
 
+CSP = ("frame-ancestors 'none'; object-src 'none'; base-uri 'none'; "
+       "form-action 'self'; connect-src 'self'")
+
+
 def _cross_site_rejection(request: Request) -> Optional[JSONResponse]:
     path = request.url.path
     if not path.startswith("/api/"):
@@ -62,6 +66,12 @@ def _cross_site_rejection(request: Request) -> Optional[JSONResponse]:
     site = request.headers.get("sec-fetch-site")
     if site is not None and site.lower() not in _ALLOWED_FETCH_SITES:
         return JSONResponse({"detail": "不允許跨站請求"}, status_code=403)
+    # 舊瀏覽器不送 Sec-Fetch-Site；跨站 no-cors POST 可不帶/帶 text/plain 的 Content-Type 繞過，
+    # 所以有 body 的方法一律要求 application/json（跨站帶它會觸發 preflight）
+    if request.method in ("POST", "PUT", "PATCH"):
+        media = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        if media != "application/json":
+            return JSONResponse({"detail": "只接受 application/json"}, status_code=415)
     # 寫入設定的端點另外限定來源為本機，即使有人把 host 改成 0.0.0.0 區網也不能改
     if path.startswith("/api/settings") and request.method not in ("GET", "HEAD", "OPTIONS"):
         host = request.client.host if request.client else None
@@ -73,9 +83,11 @@ def _cross_site_rejection(request: Request) -> Optional[JSONResponse]:
 @app.middleware("http")
 async def block_cross_site(request: Request, call_next):
     response = _cross_site_rejection(request) or await call_next(request)
-    # 防 clickjacking（含 403 與靜態檔）：只加 frame-ancestors，不加其他 CSP 指令以免弄壞現有頁面
+    # 防 clickjacking 並收斂外連（含 403 與靜態檔）。刻意不加 default-src/script-src/style-src：
+    # 頁面大量使用 inline onclick 與 inline style，加了會整頁壞掉
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = CSP
     return response
 
 

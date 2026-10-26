@@ -461,7 +461,7 @@ def test_422_outside_settings_keeps_default_format(client):
 def test_anti_clickjacking_headers(client, path):
     r = client.get(path)
     assert r.headers["x-frame-options"] == "DENY"
-    assert r.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert r.headers["content-security-policy"] .startswith("frame-ancestors 'none'")
 
 
 def test_anti_clickjacking_headers_on_403(client):

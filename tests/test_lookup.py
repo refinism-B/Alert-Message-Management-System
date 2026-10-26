@@ -24,7 +24,7 @@ def test_query_rdap_whois_uses_rdap_when_available(monkeypatch):
     monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
     monkeypatch.setattr(
         lookup.whoisit, "domain",
-        lambda t: {"name": t, "url": "https://rdap.apnic.net/domain/example.com"},
+        lambda t, **kw: {"name": t, "url": "https://rdap.apnic.net/domain/example.com"},
     )
     result = lookup.query_rdap_whois("example.com")
     assert result["type"] == "domain"
@@ -37,7 +37,7 @@ def test_query_rdap_whois_sanitizes_non_json_native_types(monkeypatch):
     monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
     monkeypatch.setattr(
         lookup.whoisit, "ip",
-        lambda t: {
+        lambda t, **kw: {
             "name": "8.8.8.0/24",
             "network": {"cidr": ipaddress.ip_network("8.8.8.0/24")},
             "links": [],
@@ -57,7 +57,7 @@ def test_query_rdap_whois_falls_back_to_whois_on_unsupported_tld(monkeypatch):
     monkeypatch.setattr(lookup.whoisit, "domain", raise_unsupported)
     monkeypatch.setattr(
         lookup.whois, "whois",
-        lambda t: {"domain_name": t.upper(), "name_servers": ["ns1.example"]},
+        lambda t, **kw: {"domain_name": t.upper(), "name_servers": ["ns1.example"]},
     )
     result = lookup.query_rdap_whois("example.oldtld")
     assert result["source"] == "WHOIS 備援（TCP 43）"
@@ -72,7 +72,7 @@ def test_query_rdap_whois_raises_when_both_fail(monkeypatch):
 
     monkeypatch.setattr(lookup.whoisit, "ip", raise_query_error)
 
-    def raise_whois_error(t):
+    def raise_whois_error(t, **kw):
         raise Exception("whois server unreachable")
 
     monkeypatch.setattr(lookup.whois, "whois", raise_whois_error)
@@ -83,8 +83,8 @@ def test_query_rdap_whois_raises_when_both_fail(monkeypatch):
 def test_query_rdap_whois_rejects_invalid_domain_syntax(monkeypatch):
     called = {"bootstrap": False, "domain": False, "whois": False}
     monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: called.__setitem__("bootstrap", True))
-    monkeypatch.setattr(lookup.whoisit, "domain", lambda t: called.__setitem__("domain", True))
-    monkeypatch.setattr(lookup.whois, "whois", lambda t: called.__setitem__("whois", True))
+    monkeypatch.setattr(lookup.whoisit, "domain", lambda t, **kw: called.__setitem__("domain", True))
+    monkeypatch.setattr(lookup.whois, "whois", lambda t, **kw: called.__setitem__("whois", True))
     # 使用者打錯字是輸入問題（400），不是上游服務失敗（502）
     with pytest.raises(lookup.UnsupportedTargetError):
         lookup.query_rdap_whois("../users/me")
@@ -93,7 +93,7 @@ def test_query_rdap_whois_rejects_invalid_domain_syntax(monkeypatch):
 
 def test_query_rdap_whois_accepts_valid_domain(monkeypatch):
     monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
-    monkeypatch.setattr(lookup.whoisit, "domain", lambda t: {"name": t, "url": ""})
+    monkeypatch.setattr(lookup.whoisit, "domain", lambda t, **kw: {"name": t, "url": ""})
     result = lookup.query_rdap_whois("example.com")
     assert result["target"] == "example.com"
 
@@ -143,7 +143,7 @@ def test_query_rdap_whois_rejects_all_empty_whois_entry(monkeypatch):
 
     monkeypatch.setattr(lookup.whoisit, "domain", raise_unsupported)
     monkeypatch.setattr(lookup.whois, "whois",
-                        lambda t: {k: None for k in ("domain_name", "registrar", "creation_date")})
+                        lambda t, **kw: {k: None for k in ("domain_name", "registrar", "creation_date")})
     with pytest.raises(lookup.LookupFailedError):
         lookup.query_rdap_whois("example.oldtld")
 
@@ -158,7 +158,7 @@ def test_query_rdap_whois_falls_back_when_whoisit_parser_leaks_non_whoisit_error
 
     monkeypatch.setattr(lookup.whoisit, "domain", broken_parser)
     monkeypatch.setattr(lookup.whois, "whois",
-                        lambda t: {"domain_name": "EXAMPLE.COM", "registrar": "Example Registrar"})
+                        lambda t, **kw: {"domain_name": "EXAMPLE.COM", "registrar": "Example Registrar"})
     result = lookup.query_rdap_whois("example.com")
     assert result["source"] == "WHOIS 備援（TCP 43）"
 
@@ -173,9 +173,9 @@ def test_bootstrap_failure_is_not_retried_on_every_request(monkeypatch):
     monkeypatch.setattr(lookup.whoisit, "bootstrap", failing_bootstrap)
     monkeypatch.setattr(lookup.whoisit, "is_bootstrapped", lambda: False)
     monkeypatch.setattr(lookup.whoisit, "domain",
-                        lambda t: (_ for _ in ()).throw(AssertionError("bootstrap 失敗時不得查 RDAP")))
+                        lambda t, **kw: (_ for _ in ()).throw(AssertionError("bootstrap 失敗時不得查 RDAP")))
     monkeypatch.setattr(lookup.whois, "whois",
-                        lambda t: {"domain_name": "EXAMPLE.COM", "registrar": "Example Registrar"})
+                        lambda t, **kw: {"domain_name": "EXAMPLE.COM", "registrar": "Example Registrar"})
     for _ in range(3):
         assert lookup.query_rdap_whois("example.com")["source"] == "WHOIS 備援（TCP 43）"
     assert calls["bootstrap"] == 1
@@ -819,10 +819,10 @@ def test_numeric_last_label_rejected(target):
 
 def test_whois_fallback_never_called_with_ip_string(monkeypatch):
     """雙重保險：即使正規化有漏，網域備援也絕不對 IP 字串呼叫 python-whois。"""
-    monkeypatch.setattr(lookup, "normalize_target", lambda t: ("10.0.0.1", "domain"))
+    monkeypatch.setattr(lookup, "normalize_target", lambda t, **kw: ("10.0.0.1", "domain"))
     monkeypatch.setattr(lookup, "_ensure_bootstrapped", lambda: False)
     monkeypatch.setattr(lookup.whois, "whois",
-                        lambda t: (_ for _ in ()).throw(AssertionError("不得對 IP 呼叫 python-whois")))
+                        lambda t, **kw: (_ for _ in ()).throw(AssertionError("不得對 IP 呼叫 python-whois")))
     with pytest.raises(lookup.LookupFailedError):
         lookup.query_rdap_whois("10.0.0.1")
 
@@ -916,3 +916,23 @@ def test_concurrent_vt_misses_hit_upstream_once(monkeypatch):
     assert len(results) == workers
     assert sum(1 for r in results if r["cached"] is False) == 1
     assert lookup._vt_inflight._locks == {}  # 鎖用完即回收
+
+
+def test_whois_fallback_does_not_follow_referral(monkeypatch):
+    """C2 回歸：WHOIS 備援必須帶 WHOIS_QUICK，不跟隨回應指定的 referral 主機。"""
+    from whois.whois import NICClient
+    monkeypatch.setattr(lookup.whoisit, "bootstrap", lambda: None)
+
+    def raise_unsupported(*a, **k):
+        raise lookup.whoisit_errors.UnsupportedError("no rdap")
+
+    monkeypatch.setattr(lookup.whoisit, "domain", raise_unsupported)
+    seen = {}
+
+    def fake_whois(t, **kw):
+        seen.update(kw)
+        return {"domain_name": "EXAMPLE.OLDTLD", "registrar": "R"}
+
+    monkeypatch.setattr(lookup.whois, "whois", fake_whois)
+    lookup.query_rdap_whois("example.oldtld")
+    assert seen["flags"] & NICClient.WHOIS_QUICK

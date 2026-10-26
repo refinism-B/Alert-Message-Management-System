@@ -15,6 +15,7 @@ import anthropic
 import httpx
 import whois
 import whoisit
+from whois.whois import NICClient
 from whoisit import errors as whoisit_errors
 
 import postprocess
@@ -227,7 +228,8 @@ def query_rdap_whois(target: str) -> dict:
         raise LookupFailedError("RDAP 查詢失敗；IP 目標無可靠的 WHOIS 備援")
 
     try:
-        w = whois.whois(target)
+        # WHOIS_QUICK：不跟隨回應內容指定的 referral 主機（否則可被誘導連任意主機，洩漏分析者 IP／探內網）
+        w = whois.whois(target, flags=NICClient.WHOIS_QUICK)
     except Exception as e:
         raise LookupFailedError(f"RDAP 與 WHOIS 查詢皆失敗：{e}") from e
 

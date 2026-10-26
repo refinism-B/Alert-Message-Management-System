@@ -75,3 +75,24 @@ def test_put_schema_missing_offense_id_message_is_chinese(client):
 def test_put_schema_strips_whitespace(client):
     r = client.put("/api/schema", json={"fields": [" Offense ID ", " A"]})
     assert r.status_code == 200 and r.json()["fields"] == ["Offense ID", "A"]
+
+
+def test_write_requires_json_content_type(client):
+    """C4 回歸：舊瀏覽器沒有 Sec-Fetch-Site，改靠 Content-Type 擋跨站 no-cors POST。"""
+    body = b'{"date": "2026-01-01", "fields": {"a": "b"}}'
+    for headers in ({}, {"content-type": "text/plain"}):
+        r = client.post("/api/reports", content=body, headers=headers)
+        assert r.status_code == 415
+        assert r.json() == {"detail": "只接受 application/json"}
+    r = client.post("/api/reports", content=body,
+                    headers={"content-type": "Application/JSON; charset=utf-8"})
+    assert r.status_code != 415
+
+
+def test_security_headers_on_page_and_api(client):
+    csp = ("frame-ancestors 'none'; object-src 'none'; base-uri 'none'; "
+           "form-action 'self'; connect-src 'self'")
+    for path in ("/", "/api/dates"):
+        r = client.get(path)
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["content-security-policy"] == csp

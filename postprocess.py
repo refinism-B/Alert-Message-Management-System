@@ -1615,7 +1615,8 @@ def _facts_from_raw_rdap(rdap: dict) -> dict:
 
 # 刻意不為每個 RIR 各寫一支解析器——五個 RIR 乘上格式變動是維護黑洞。
 # 改用通用的 key: value 逐行解析，只認得幾個已知的網段關鍵字，抓不到就什麼都不做。
-_WHOIS_LINE_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 _-]{0,40}?)\s*:\s*(.*?)\s*$")
+# 值群組不做尾端空白回溯（舊的 (.*?)\s*$ 在長空白行上 O(n²)），呼叫端自行 strip
+_WHOIS_LINE_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9 _-]{0,40}?)\s*:\s*(.*)$")
 _WHOIS_NETWORK_KEYS = ("netrange", "cidr", "inetnum", "inet6num", "route", "route6")
 _WHOIS_ORG_KEYS = ("organization", "orgname", "org-name", "descr", "netname", "owner")
 _WHOIS_COUNTRY_KEYS = ("country",)

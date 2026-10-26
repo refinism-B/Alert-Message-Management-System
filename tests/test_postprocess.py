@@ -955,3 +955,13 @@ def test_compare_sources_fail_safe_on_unexpected_error(monkeypatch):
     result = postprocess.compare_sources({"data": {}}, None, now=NOW)
     assert result["rows"] == []
     assert result["warnings"] and "比對失敗" in result["warnings"][0]
+
+
+def test_parse_whois_text_long_whitespace_line_is_linear():
+    """ReDoS 回歸：key:x + 大量空白 + y 的長行不得 O(n²)。"""
+    import time
+    text = "netname:x" + " " * 200_000 + "y"
+    start = time.perf_counter()
+    parsed = postprocess.parse_whois_text(text)
+    assert time.perf_counter() - start < 1
+    assert parsed == {"netname": ["x" + " " * 200_000 + "y"]}
