@@ -64,3 +64,12 @@ def _reset_lookup_state():
     lookup._vt_cache.clear()
     lookup._bootstrap_failed_at = None
     lookup._client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_image_dir(tmp_path, monkeypatch):
+    """截圖一律寫到 tmp_path，測試不會碰真實的 image/。"""
+    import images
+    path = tmp_path / "image"
+    monkeypatch.setattr(images, "IMAGE_DIR", path)
+    return path

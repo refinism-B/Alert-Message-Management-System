@@ -28,6 +28,7 @@ htmlcov/
 
 # Runtime data
 data/
+image/
 
 # IDE / tools
 .superpowers/
