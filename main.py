@@ -190,7 +190,10 @@ def get_image(report_id: int, seq: int):
 def delete_image(report_id: int, seq: int) -> models.ImageListResponse:
     report = _report_or_404(report_id)
     offense_id, _ = _image_file_or_404(report, seq)
-    images.delete_image(report["date"], offense_id, seq)
+    try:
+        images.delete_image(report["date"], offense_id, seq)
+    except images.ImageError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return {"images": images.list_images(report["date"], offense_id)}
 
 

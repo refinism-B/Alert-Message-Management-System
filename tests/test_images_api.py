@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -77,12 +78,40 @@ def test_upload_requires_offense_id_400(client):
     assert r.json()["detail"] == "請先填寫 Offense ID"
 
 
-def test_upload_rejected_for_duplicate_offense(client, monkeypatch):
+def test_upload_rejected_for_duplicate_offense(client):
     rid = _mk()
-    monkeypatch.setattr(database, "offense_count_on_date", lambda d, o: 2)
+    with database.get_conn() as conn:
+        conn.execute("DROP INDEX ix_reports_offense")
+        # 繞過 create_report 的重複檢查，模擬舊資料
+        conn.execute(
+            "INSERT INTO reports (date, fields, field_order, created_at, updated_at) "
+            "SELECT date, fields, field_order, created_at, updated_at FROM reports WHERE id = ?", (rid,))
     r = _up(client, rid)
     assert r.status_code == 409
     assert "重複" in r.json()["detail"]
+
+
+def test_delete_image_unlink_failure_409(client, monkeypatch):
+    rid = _mk()
+    _up(client, rid)
+
+    def boom(self, *a, **k):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(Path, "unlink", boom)
+    r = client.delete(f"/api/reports/{rid}/images/1")
+    assert r.status_code == 409
+    assert "8267-1.png" in r.json()["detail"]
+
+
+def test_upload_storage_failure_400(client, monkeypatch):
+    rid = _mk()
+
+    def boom(self, *a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    assert _up(client, rid).status_code == 400
 
 
 def test_upload_requires_json_content_type(client):

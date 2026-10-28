@@ -53,20 +53,32 @@ def add_image(date: str, offense_id: str, data: bytes) -> str:
     if len(data) > MAX_IMAGE_BYTES:
         raise ImageError("圖片過大（上限 10 MB）")
     d = day_dir(date)
-    d.mkdir(parents=True, exist_ok=True)
-    existing = list_images(date, offense_id)
-    seq = seq_of(existing[-1]) + 1 if existing else 1
-    name = f"{offense_id}-{seq}.png"
-    with open(d / name, "xb") as f:  # 排他建立，絕不覆蓋
-        f.write(data)
-    return name
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        # 並行上傳可能算出同一序號：排他建立失敗就重算，不覆蓋
+        for _ in range(5):
+            existing = list_images(date, offense_id)
+            seq = seq_of(existing[-1]) + 1 if existing else 1
+            name = f"{offense_id}-{seq}.png"
+            try:
+                with open(d / name, "xb") as f:
+                    f.write(data)
+                return name
+            except FileExistsError:
+                continue
+    except OSError as e:
+        raise ImageError(f"儲存截圖失敗：{e.strerror or e}") from e
+    raise ImageError("儲存截圖失敗：序號衝突，請重試")
 
 
 def delete_image(date: str, offense_id: str, seq: int) -> bool:
     p = image_path(date, offense_id, seq)
     if p is None:
         return False
-    p.unlink()
+    try:
+        p.unlink()
+    except OSError as e:
+        raise ImageError(f"刪除截圖失敗：{p.name}") from e
     return True
 
 

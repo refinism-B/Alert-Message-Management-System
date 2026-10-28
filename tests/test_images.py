@@ -143,3 +143,37 @@ def test_delete_all_is_atomic_when_rename_fails(monkeypatch):
         with pytest.raises(images.ImageError):
             images.delete_all(D, "8267")
     assert images.list_images(D, "8267") == ["8267-1.png", "8267-2.png"]
+
+
+def test_add_image_retries_on_seq_collision(monkeypatch):
+    images.add_image(D, "8267", PNG)
+    real = images.list_images
+    calls = []
+
+    def stale(date, oid):
+        calls.append(1)
+        return [] if len(calls) == 1 else real(date, oid)  # 第一次看到過期清單，模擬並行
+
+    monkeypatch.setattr(images, "list_images", stale)
+    assert images.add_image(D, "8267", PNG) == "8267-2.png"
+    assert (images.day_dir(D) / "8267-1.png").read_bytes() == PNG
+
+
+def test_add_image_oserror_becomes_image_error(monkeypatch):
+    def boom(self, *a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    with pytest.raises(images.ImageError, match="儲存截圖失敗"):
+        images.add_image(D, "8267", PNG)
+
+
+def test_delete_image_oserror_becomes_image_error(monkeypatch):
+    images.add_image(D, "8267", PNG)
+
+    def boom(self, *a, **k):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(Path, "unlink", boom)
+    with pytest.raises(images.ImageError, match="8267-1.png"):
+        images.delete_image(D, "8267", 1)
