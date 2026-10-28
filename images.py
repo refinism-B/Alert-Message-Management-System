@@ -19,7 +19,7 @@ def day_dir(date: str) -> Path:
 def check_offense_id(offense_id: str) -> None:
     if not offense_id:
         raise ImageError("請先填寫 Offense ID")
-    if not _ID_RE.match(offense_id):
+    if not _ID_RE.fullmatch(offense_id):
         raise ImageError("Offense ID 含不允許的字元（僅限英數字、-、_），無法存圖")
 
 
@@ -28,14 +28,14 @@ def seq_of(filename: str) -> int:
 
 
 def list_images(date: str, offense_id: str) -> list[str]:
-    if not _ID_RE.match(offense_id):
+    if not _ID_RE.fullmatch(offense_id):
         return []
     d = day_dir(date)
     if not d.is_dir():
         return []
     # 完整比對，避免 8267 撈到 8267-1-1.png
     pat = re.compile(rf"^{re.escape(offense_id)}-(\d+)\.png$")
-    names = [p.name for p in d.iterdir() if p.is_file() and pat.match(p.name)]
+    names = [p.name for p in d.iterdir() if p.is_file() and pat.fullmatch(p.name)]
     return sorted(names, key=seq_of)
 
 
