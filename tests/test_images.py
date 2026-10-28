@@ -51,8 +51,7 @@ def test_add_rejects_oversize():
         images.add_image(D, "8267", PNG + b"0" * images.MAX_IMAGE_BYTES)
 
 
-@pytest.mark.parametrize("bad", ["", "../x", "a/b", "8267 ", "8267
-", "中文"])
+@pytest.mark.parametrize("bad", ["", "../x", "a/b", "8267 ", "8267\n", "中文"])
 def test_add_rejects_bad_offense_id(bad):
     with pytest.raises(images.ImageError):
         images.add_image(D, bad, PNG)
@@ -68,8 +67,7 @@ def test_add_never_overwrites():
 
 def test_list_images_invalid_id_or_missing_dir_is_empty():
     assert images.list_images(D, "../x") == []
-    assert images.list_images(D, "8267
-") == []
+    assert images.list_images(D, "8267\n") == []
     assert images.list_images(D, "8267") == []
 
 
