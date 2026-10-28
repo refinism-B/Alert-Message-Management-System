@@ -103,6 +103,28 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .report-card.editing .edit-label { text-align: center; padding: 10px 14px 6px; margin-bottom: 0; }
 .report-card.editing .card-actions { justify-content: center; gap: 12px; }
 
+/* Report screenshots */
+.thumbs { width: 156px; flex-shrink: 0; border-left: 1px solid #334155; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.thumb { position: relative; width: 136px; height: 85px; cursor: zoom-in; }
+.thumb img { width: 136px; height: 85px; object-fit: cover; border: 1px solid #475569; border-radius: 4px; display: block; }
+.thumb .more { position: absolute; inset: 0; background: rgba(0,0,0,.6); border-radius: 4px; color: #fff; font-size: 26px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.image-editor { margin-bottom: 12px; }
+.img-list { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.img-item { position: relative; width: 176px; border: 1px solid #475569; border-radius: 4px; padding: 6px; background: #0f172a; }
+.img-item.new { border-color: #10b981; }
+.img-item img { width: 100%; height: 90px; object-fit: cover; border-radius: 3px; display: block; }
+.img-name { margin-top: 4px; font-size: 13px; color: #94a3b8; overflow-wrap: anywhere; }
+.img-item.new .img-name { color: #6ee7b7; }
+.img-remove { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid #7f1d1d; background: #450a0a; color: #fca5a5; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; }
+.paste-zone { width: 260px; height: 80px; border: 2px solid #475569; border-radius: 6px; color: #94a3b8; font-size: 15px; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; outline: none; }
+.paste-zone:focus { border-color: #3b82f6; color: #bfdbfe; background: rgba(59,130,246,.15); box-shadow: 0 0 0 4px rgba(59,130,246,.25); }
+.lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.8); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.lb-top { width: min(960px, 92vw); display: flex; justify-content: space-between; align-items: center; color: #e2e8f0; font-size: 16px; }
+.lb-close { font-size: 26px; cursor: pointer; color: #cbd5e1; }
+.lb-stage { display: flex; align-items: center; gap: 18px; }
+.lb-stage img { max-width: min(880px, 80vw); max-height: 78vh; object-fit: contain; background: #0f172a; border-radius: 4px; }
+.lb-arrow { width: 48px; height: 48px; flex-shrink: 0; border-radius: 50%; background: rgba(30,41,59,.9); border: 1px solid #475569; color: #e2e8f0; font-size: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; }
+
 /* Search results */
 .search-date-tag { font-size: 15px; color: #3b82f6; margin-bottom: 4px; }
 #no-results { text-align: center; color: #475569; padding: 40px; }
@@ -930,6 +952,9 @@ function buildCard(report, showDate = false) {
   body.append(fieldsEl, actions);
   card.appendChild(body);
 
+  const thumbs = buildThumbs(report);
+  if (thumbs) card.appendChild(thumbs);
+
   if (!showDate) {
     const zone = document.createElement('div');
     zone.className = 'select-zone';
@@ -1178,8 +1203,10 @@ function renderAddForm(template) {
         showToast(`儲存失敗：${e.message}`, 'error');
         return;
       }
+      const { errors } = await applyImageChanges(created.id, form._imageEditor.getChanges(), []);
       closeAddModal();
-      showToast('已成功儲存');
+      if (errors.length) showToast(`截圖處理失敗：${errors.join('；')}`, 'error');
+      else showToast('已成功儲存');
       await loadDates();
       await selectDate(currentDate);
       document.getElementById(`card-${created.id}`)?.classList.add('card-slide-in');
@@ -1187,6 +1214,7 @@ function renderAddForm(template) {
     closeAddModal,
     schemaFields
   );
+  form._imageEditor = mountImageEditor(form, [], null);
   modal.appendChild(form);
 }
 
@@ -1232,12 +1260,17 @@ function editReport(id) {
         showToast(`儲存失敗：${e.message}`, 'error');
         return;
       }
+      // 通報已存；圖片逐張處理，部分失敗要明講，畫面以最後一次成功回應的清單為準
+      const { images, errors } = await applyImageChanges(id, div._imageEditor.getChanges(), updated.images);
+      updated.images = images;
       currentReports = currentReports.map(r => (r.id === id ? updated : r));
       restoreCard(card, updated);
-      showToast('已成功儲存');
+      if (errors.length) showToast(`截圖處理失敗：${errors.join('；')}`, 'error');
+      else showToast('已成功儲存');
     },
     () => restoreCard(card, report)
   );
+  form._imageEditor = mountImageEditor(form, report.images || [], id);
   card.appendChild(form);
 }
 
@@ -1256,6 +1289,7 @@ document.getElementById('search-input').addEventListener('keydown', e => {
 // toast 容器與抽屜在 script 之後才出現；等 DOM 解析完再啟動，init 立刻失敗時才有地方顯示錯誤
 document.addEventListener('DOMContentLoaded', init);
 </script>
+<script src="report-images.js"></script>
 <script src="ip-lookup.js"></script>
 <script src="settings.js"></script>
 <div id="drawer-overlay" onclick="closeSchemaDrawer()"></div>
