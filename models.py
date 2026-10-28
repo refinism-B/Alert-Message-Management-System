@@ -39,6 +39,19 @@ class ReportResponse(BaseModel):
     field_order: list[str]
     created_at: str
     updated_at: str
+    images: list[str] = []
+
+
+class ImageUpload(BaseModel):
+    data: str  # 純 base64，無 data: 前綴
+
+
+class ImageListResponse(BaseModel):
+    images: list[str]
+
+
+class ImageUploadResponse(ImageListResponse):
+    filename: str
 
 
 class SchemaUpdate(BaseModel):

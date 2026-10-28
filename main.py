@@ -8,15 +8,19 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from typing import Literal, Optional
+import base64
+import binascii
 import ipaddress
 import json
 import os
+import re
 
 import database
+import images
 import lookup
 import models
 import postprocess
@@ -132,9 +136,62 @@ def update_report(report_id: int, body: models.ReportUpdate) -> models.ReportRes
 
 @app.delete("/api/reports/{report_id}")
 def delete_report(report_id: int) -> dict:
-    if not database.delete_report(report_id):
+    try:
+        deleted = database.delete_report(report_id)
+    except images.ImageError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Report not found")
     return {"ok": True}
+
+
+def _report_or_404(report_id: int) -> dict:
+    report = database.get_report(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+@app.post("/api/reports/{report_id}/images", status_code=201)
+def upload_image(report_id: int, body: models.ImageUpload) -> models.ImageUploadResponse:
+    report = _report_or_404(report_id)
+    offense_id = report["fields"].get("Offense ID", "").strip()
+    try:
+        images.check_offense_id(offense_id)
+        # 同日重複的 Offense ID 會共用檔名前綴，圖會張冠李戴
+        if database.offense_count_on_date(report["date"], offense_id) > 1:
+            raise HTTPException(status_code=409, detail="此 Offense ID 在同日有重複通報，請先處理重複資料")
+        try:
+            data = base64.b64decode(body.data, validate=True)
+        except (binascii.Error, ValueError):
+            raise HTTPException(status_code=400, detail="圖片資料格式錯誤")
+        # date 一律取 DB 內的值，不用請求帶的
+        filename = images.add_image(report["date"], offense_id, data)
+    except images.ImageError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"filename": filename, "images": images.list_images(report["date"], offense_id)}
+
+
+def _image_file_or_404(report: dict, seq: int):
+    offense_id = report["fields"].get("Offense ID", "").strip()
+    path = images.image_path(report["date"], offense_id, seq)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return offense_id, path
+
+
+@app.get("/api/reports/{report_id}/images/{seq}")
+def get_image(report_id: int, seq: int):
+    _, path = _image_file_or_404(_report_or_404(report_id), seq)
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+@app.delete("/api/reports/{report_id}/images/{seq}")
+def delete_image(report_id: int, seq: int) -> models.ImageListResponse:
+    report = _report_or_404(report_id)
+    offense_id, _ = _image_file_or_404(report, seq)
+    images.delete_image(report["date"], offense_id, seq)
+    return {"images": images.list_images(report["date"], offense_id)}
 
 
 @app.get("/api/schema")
@@ -213,20 +270,28 @@ def _check_payload_size(**payloads: Optional[dict]) -> None:
 # 再加 target 與 JSON 外層結構的餘裕。這道關卡在 JSON 解析「之前」，擋住記憶體與解析成本；
 # 上面逐欄位的檢查保留，用來擋單一來源過大。
 MAX_LOOKUP_BODY_BYTES = 2 * MAX_LOOKUP_PAYLOAD_BYTES + 64 * 1024
-_BODY_LIMITED_PATHS = {"/api/lookup/compare", "/api/lookup/analyze"}
+# 截圖以 base64 上傳（膨脹 4/3），上限依單張圖片上限推算
+MAX_IMAGE_BODY_BYTES = (images.MAX_IMAGE_BYTES * 4) // 3 + 64 * 1024
+
+
+def _body_limit(path: str) -> Optional[int]:
+    if path in ("/api/lookup/compare", "/api/lookup/analyze"):
+        return MAX_LOOKUP_BODY_BYTES
+    if re.fullmatch(r"/api/reports/\d+/images", path):
+        return MAX_IMAGE_BODY_BYTES
+    return None
 
 
 class BodySizeLimitMiddleware:
     """純 ASGI middleware：先看 Content-Length，超過直接 413；沒有（chunked）時
     邊讀邊計數，超過就停止讀取並回 413。未超限才把已讀的內容重放給後面的 app。"""
 
-    def __init__(self, app, max_bytes: int = MAX_LOOKUP_BODY_BYTES):
+    def __init__(self, app):
         self.app = app
-        self.max_bytes = max_bytes
 
-    async def _reject(self, send) -> None:
+    async def _reject(self, send, max_bytes: int) -> None:
         body = json.dumps(
-            {"detail": f"請求內容過大（上限 {self.max_bytes:,} bytes）"}, ensure_ascii=False
+            {"detail": f"請求內容過大（上限 {max_bytes:,} bytes）"}, ensure_ascii=False
         ).encode("utf-8")
         await send({"type": "http.response.start", "status": 413,
                     "headers": [(b"content-type", b"application/json"),
@@ -234,8 +299,9 @@ class BodySizeLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
     async def __call__(self, scope, receive, send):
-        if (scope["type"] != "http" or scope["method"] != "POST"
-                or scope["path"] not in _BODY_LIMITED_PATHS):
+        max_bytes = (_body_limit(scope["path"])
+                     if scope["type"] == "http" and scope["method"] == "POST" else None)
+        if max_bytes is None:
             await self.app(scope, receive, send)
             return
 
@@ -245,8 +311,8 @@ class BodySizeLimitMiddleware:
                     declared = int(value)
                 except ValueError:
                     break  # 無效值：退回逐塊計數
-                if declared > self.max_bytes:
-                    await self._reject(send)
+                if declared > max_bytes:
+                    await self._reject(send, max_bytes)
                     return
                 break
 
@@ -257,8 +323,8 @@ class BodySizeLimitMiddleware:
             if message["type"] == "http.disconnect":
                 return
             total += len(message.get("body", b""))
-            if total > self.max_bytes:
-                await self._reject(send)
+            if total > max_bytes:
+                await self._reject(send, max_bytes)
                 return
             if not message.get("more_body", False):
                 break
