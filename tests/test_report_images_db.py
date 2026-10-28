@@ -104,7 +104,7 @@ def test_delete_report_image_failure_rolls_back(monkeypatch):
     def boom(*a):
         raise images.ImageError("x")
 
-    monkeypatch.setattr(images, "delete_all", boom)
+    monkeypatch.setattr(images, "stage_delete", boom)
     with pytest.raises(images.ImageError):
         database.delete_report(r["id"])
     assert database.get_report(r["id"]) is not None
@@ -114,3 +114,55 @@ def test_offense_count_on_date():
     _mk()
     assert database.offense_count_on_date(D, "8267") == 1
     assert database.offense_count_on_date("2026-10-27", "8267") == 0
+
+
+def test_delete_report_commit_failure_keeps_report_and_images(monkeypatch):
+    from contextlib import contextmanager
+
+    r = _mk()
+    images.add_image(D, "8267", PNG)
+    images.add_image(D, "8267", PNG)
+    real = database.get_conn
+
+    @contextmanager
+    def failing_commit():
+        with real() as conn:
+            yield conn
+            raise RuntimeError("commit failed")  # 模擬暫名之後 commit 失敗（交易回滾）
+
+    monkeypatch.setattr(database, "get_conn", failing_commit)
+    with pytest.raises(RuntimeError):
+        database.delete_report(r["id"])
+    monkeypatch.setattr(database, "get_conn", real)
+    assert database.get_report(r["id"]) is not None
+    assert images.list_images(D, "8267") == ["8267-1.png", "8267-2.png"]
+
+
+def test_report_with_bad_legacy_date_lists_no_images():
+    r = _mk()
+    with database.get_conn() as conn:
+        conn.execute("UPDATE reports SET date = ? WHERE id = ?", ("../bad", r["id"]))
+    assert database.get_report(r["id"])["images"] == []
+
+
+def test_update_commit_failure_restores_image_names(monkeypatch):
+    from contextlib import contextmanager
+
+    r = _mk()
+    images.add_image(D, "8267", PNG)
+    images.add_image(D, "8267", PNG)
+    real = database.get_conn
+
+    @contextmanager
+    def failing_commit():
+        with real() as conn:
+            yield conn
+            raise RuntimeError("commit failed")  # 模擬改名之後 commit 失敗（交易回滾）
+
+    monkeypatch.setattr(database, "get_conn", failing_commit)
+    with pytest.raises(RuntimeError):
+        database.update_report(r["id"], {"Offense ID": "9000"}, ["Offense ID"])
+    monkeypatch.setattr(database, "get_conn", real)
+    assert database.get_report(r["id"])["fields"]["Offense ID"] == "8267"
+    assert images.list_images(D, "8267") == ["8267-1.png", "8267-2.png"]
+    assert images.list_images(D, "9000") == []

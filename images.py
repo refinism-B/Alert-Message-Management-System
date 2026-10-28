@@ -1,11 +1,15 @@
 """通報截圖的磁碟儲存。不得 import database（database 會 import 本模組）。"""
 import re
+import threading
 from pathlib import Path
 
 IMAGE_DIR: Path = Path(__file__).resolve().parent / "image"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+# 序列化「讀報告 + 寫/改名/刪圖」；非重入，持有者路徑上不可再取（endpoint 與 database 各取一次，互不巢狀）
+IMAGE_LOCK = threading.Lock()
 
 
 class ImageError(ValueError):
@@ -13,6 +17,8 @@ class ImageError(ValueError):
 
 
 def day_dir(date: str) -> Path:
+    if not _DATE_RE.fullmatch(date):
+        raise ImageError("通報日期格式錯誤，無法存取截圖")
     return IMAGE_DIR / date.replace("-", "")
 
 
@@ -30,7 +36,10 @@ def seq_of(filename: str) -> int:
 def list_images(date: str, offense_id: str) -> list[str]:
     if not _ID_RE.fullmatch(offense_id):
         return []
-    d = day_dir(date)
+    try:
+        d = day_dir(date)
+    except ImageError:
+        return []  # 舊資料日期異常：顯示用列表視為沒有圖
     if not d.is_dir():
         return []
     # 完整比對，避免 8267 撈到 8267-1-1.png
@@ -82,8 +91,23 @@ def delete_image(date: str, offense_id: str, seq: int) -> bool:
     return True
 
 
-def delete_all(date: str, offense_id: str) -> None:
-    # 兩階段：先全部改成暫名（可整批還原），都成功才真的刪，避免刪到一半留下缺圖
+def _restore(pairs: list[tuple[Path, Path]]) -> list[str]:
+    """逐筆把 (原名, 現名) 改回原名，單筆失敗不中斷；回傳還原失敗的原檔名。"""
+    failed = []
+    for orig, cur in reversed(pairs):
+        try:
+            cur.rename(orig)
+        except OSError:
+            failed.append(orig.name)
+    return failed
+
+
+def _fail_msg(msg: str, failed: list[str]) -> str:
+    return msg + (f"，且以下檔案無法還原：{'、'.join(failed)}" if failed else "")
+
+
+def stage_delete(date: str, offense_id: str) -> list[tuple[Path, Path]]:
+    # 只改成暫名（可整批還原）；真正刪除由 finish_delete 在 DB commit 成功後做
     d = day_dir(date)
     moved: list[tuple[Path, Path]] = []
     for name in list_images(date, offense_id):
@@ -91,15 +115,25 @@ def delete_all(date: str, offense_id: str) -> None:
         try:
             src.rename(tmp)
         except OSError as e:
-            for s, t in reversed(moved):
-                t.rename(s)
-            raise ImageError(f"刪除截圖失敗：{name}") from e
+            raise ImageError(_fail_msg(f"刪除截圖失敗：{name}", _restore(moved))) from e
         moved.append((src, tmp))
+    return moved
+
+
+def restore_staged(moved: list[tuple[Path, Path]]) -> list[str]:
+    return _restore(moved)
+
+
+def finish_delete(moved: list[tuple[Path, Path]]) -> None:
     for _, tmp in moved:
         try:
             tmp.unlink()
         except OSError:
             pass  # 殘留暫名檔不會被 list_images 列出，無害
+
+
+def delete_all(date: str, offense_id: str) -> None:
+    finish_delete(stage_delete(date, offense_id))
 
 
 def rename_all(date: str, old_id: str, new_id: str) -> None:
@@ -118,6 +152,5 @@ def rename_all(date: str, old_id: str, new_id: str) -> None:
             src.rename(dst)
             done.append((src, dst))
     except OSError as e:
-        for src, dst in reversed(done):
-            dst.rename(src)
-        raise ImageError(f"截圖改名失敗，已還原：{e}") from e
+        failed = _restore(done)
+        raise ImageError(_fail_msg(f"截圖改名失敗：{e}", failed) if failed else f"截圖改名失敗，已還原：{e}") from e

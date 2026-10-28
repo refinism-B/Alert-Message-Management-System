@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import database
+import images
 import main
 from tests.test_api import tmp_db, client  # noqa: F401
 
@@ -133,3 +134,18 @@ def test_lookup_body_limit_unchanged(client):
                     content=b"x" * (main.MAX_LOOKUP_BODY_BYTES + 1),
                     headers={"content-type": "application/json"})
     assert r.status_code == 413
+
+
+def test_upload_holds_image_lock(client, monkeypatch):
+    rid = _mk()
+    held = []
+    real = images.add_image
+
+    def spy(*a, **k):
+        held.append(images.IMAGE_LOCK.locked())
+        return real(*a, **k)
+
+    monkeypatch.setattr(images, "add_image", spy)
+    assert _up(client, rid).status_code == 201
+    assert held == [True]
+    assert not images.IMAGE_LOCK.locked()

@@ -154,22 +154,24 @@ def _report_or_404(report_id: int) -> dict:
 
 @app.post("/api/reports/{report_id}/images", status_code=201)
 def upload_image(report_id: int, body: models.ImageUpload) -> models.ImageUploadResponse:
-    report = _report_or_404(report_id)
-    offense_id = report["fields"].get("Offense ID", "").strip()
-    try:
-        images.check_offense_id(offense_id)
-        # 同日重複的 Offense ID 會共用檔名前綴，圖會張冠李戴
-        if database.offense_count_on_date(report["date"], offense_id) > 1:
-            raise HTTPException(status_code=409, detail="此 Offense ID 在同日有重複通報，請先處理重複資料")
+    # 鎖住「讀 Offense ID → 寫檔」，避免並行改 ID／刪報告後留下孤兒圖
+    with images.IMAGE_LOCK:
+        report = _report_or_404(report_id)
+        offense_id = report["fields"].get("Offense ID", "").strip()
         try:
-            data = base64.b64decode(body.data, validate=True)
-        except (binascii.Error, ValueError):
-            raise HTTPException(status_code=400, detail="圖片資料格式錯誤")
-        # date 一律取 DB 內的值，不用請求帶的
-        filename = images.add_image(report["date"], offense_id, data)
-    except images.ImageError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"filename": filename, "images": images.list_images(report["date"], offense_id)}
+            images.check_offense_id(offense_id)
+            # 同日重複的 Offense ID 會共用檔名前綴，圖會張冠李戴
+            if database.offense_count_on_date(report["date"], offense_id) > 1:
+                raise HTTPException(status_code=409, detail="此 Offense ID 在同日有重複通報，請先處理重複資料")
+            try:
+                data = base64.b64decode(body.data, validate=True)
+            except (binascii.Error, ValueError):
+                raise HTTPException(status_code=400, detail="圖片資料格式錯誤")
+            # date 一律取 DB 內的值，不用請求帶的
+            filename = images.add_image(report["date"], offense_id, data)
+        except images.ImageError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"filename": filename, "images": images.list_images(report["date"], offense_id)}
 
 
 def _image_file_or_404(report: dict, seq: int):
@@ -188,13 +190,14 @@ def get_image(report_id: int, seq: int):
 
 @app.delete("/api/reports/{report_id}/images/{seq}")
 def delete_image(report_id: int, seq: int) -> models.ImageListResponse:
-    report = _report_or_404(report_id)
-    offense_id, _ = _image_file_or_404(report, seq)
-    try:
-        images.delete_image(report["date"], offense_id, seq)
-    except images.ImageError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    return {"images": images.list_images(report["date"], offense_id)}
+    with images.IMAGE_LOCK:
+        report = _report_or_404(report_id)
+        offense_id, _ = _image_file_or_404(report, seq)
+        try:
+            images.delete_image(report["date"], offense_id, seq)
+        except images.ImageError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        return {"images": images.list_images(report["date"], offense_id)}
 
 
 @app.get("/api/schema")

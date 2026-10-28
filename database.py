@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -251,28 +252,36 @@ def get_dates() -> list[str]:
 def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict | None:
     fields, offense_id = _normalize_fields(fields)
     now = _now()
+    renamed = False
     try:
-        with get_conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            # 先確認存在：不存在的 id 一律回 None（404），不論 Offense ID 是否撞到別人
-            old = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
-            if old is None:
-                return None
-            if offense_id and _offense_exists(conn, offense_id, exclude_id=report_id):
-                raise ValueError("Offense ID 已存在")
-            date = old["date"]
-            old_id = str(json.loads(old["fields"]).get("Offense ID", "")).strip()
-            rename = old_id != offense_id and bool(images.list_images(date, old_id))
-            if rename and _offense_count_on_date(conn, date, old_id) > 1:
-                raise images.ImageError("此 Offense ID 在同日有重複通報，請先處理重複資料")
-            conn.execute(
-                "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
-                (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
-            )
-            if rename:
-                # shortcut: rename 成功後若 commit 失敗，檔案已是新名；SQLite 本機 commit 幾乎不會失敗，真遇到再補反向改名
-                images.rename_all(date, old_id, offense_id)
-            row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+        with images.IMAGE_LOCK:
+            try:
+                with get_conn() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    # 先確認存在：不存在的 id 一律回 None（404），不論 Offense ID 是否撞到別人
+                    old = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
+                    if old is None:
+                        return None
+                    if offense_id and _offense_exists(conn, offense_id, exclude_id=report_id):
+                        raise ValueError("Offense ID 已存在")
+                    date = old["date"]
+                    old_id = str(json.loads(old["fields"]).get("Offense ID", "")).strip()
+                    rename = old_id != offense_id and bool(images.list_images(date, old_id))
+                    if rename and _offense_count_on_date(conn, date, old_id) > 1:
+                        raise images.ImageError("此 Offense ID 在同日有重複通報，請先處理重複資料")
+                    conn.execute(
+                        "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
+                        (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
+                    )
+                    if rename:
+                        images.rename_all(date, old_id, offense_id)
+                        renamed = True
+                    row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+            except Exception:
+                if renamed:
+                    # DB 已 rollback 回舊 ID：檔名改回去，維持與 DB 一致
+                    images.rename_all(date, offense_id, old_id)
+                raise
     except sqlite3.IntegrityError:
         raise ValueError("Offense ID 已存在") from None
     return _row_to_report(row)
@@ -280,15 +289,25 @@ def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict 
 
 def delete_report(report_id: int) -> bool:
     """回傳是否真的刪到一筆。"""
-    with get_conn() as conn:
-        row = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
-        if row is None:
-            return False
-        conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
-        offense_id = str(json.loads(row["fields"]).get("Offense ID", "")).strip()
-        # 同日仍有同 ID 通報（舊資料重複）時圖片要留給它；刪圖失敗則例外讓交易回滾
-        if offense_id and _offense_count_on_date(conn, row["date"], offense_id) == 0:
-            images.delete_all(row["date"], offense_id)
+    moved: list = []
+    with images.IMAGE_LOCK:
+        try:
+            with get_conn() as conn:
+                row = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
+                if row is None:
+                    return False
+                conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+                offense_id = str(json.loads(row["fields"]).get("Offense ID", "")).strip()
+                # 同日仍有同 ID 通報（舊資料重複）時圖片要留給它；暫名失敗則例外讓交易回滾
+                if offense_id and _offense_count_on_date(conn, row["date"], offense_id) == 0:
+                    moved = images.stage_delete(row["date"], offense_id)
+        except BaseException:
+            # 交易失敗（含 commit）：DB 已回滾，圖檔要改回原名
+            failed = images.restore_staged(moved)
+            if failed:
+                logging.error("截圖無法還原：%s", failed)
+            raise
+        images.finish_delete(moved)  # commit 成功後才真的刪檔
         return True
 
 

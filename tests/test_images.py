@@ -185,3 +185,73 @@ def test_list_images_ignores_leading_zero_and_unicode_digits():
     for n in ("8267-1.png", "8267-01.png", "8267-\u0661.png"):
         (d / n).write_bytes(PNG)
     assert images.list_images(D, "8267") == ["8267-1.png"]
+
+
+@pytest.mark.parametrize("bad", ["2026-10-28/../x", "../../etc", "２０２６-10-28", "2026-10-28\n"])
+def test_day_dir_rejects_malformed_date(bad):
+    with pytest.raises(images.ImageError):
+        images.day_dir(bad)
+    assert images.list_images(bad, "8267") == []
+
+
+def _fail_rename_of(monkeypatch, name):
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == name:
+            raise OSError("boom")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+
+
+def test_rename_all_rollback_failure_reports_unrestored(monkeypatch):
+    for _ in range(3):
+        images.add_image(D, "8267", PNG)
+    d = images.day_dir(D)
+    real = Path.rename
+
+    def rename(self, target):
+        # 第三張改名失敗觸發回滾；回滾時 9000-1.png 還原也失敗
+        if self.name == "8267-3.png" or self.name == "9000-1.png":
+            raise OSError("boom")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(images.ImageError) as ei:
+        images.rename_all(D, "8267", "9000")
+    assert "8267-1.png" in str(ei.value)
+    assert (d / "8267-2.png").exists() and (d / "9000-1.png").exists()
+
+
+def test_stage_delete_partial_failure_restores_others(monkeypatch):
+    for _ in range(3):
+        images.add_image(D, "8267", PNG)
+    real_rename = Path.rename
+    _fail_rename_of(monkeypatch, "8267-3.png")
+    with pytest.raises(images.ImageError):
+        images.stage_delete(D, "8267")
+    monkeypatch.setattr(Path, "rename", real_rename)
+    assert images.list_images(D, "8267") == ["8267-1.png", "8267-2.png", "8267-3.png"]
+
+
+def test_stage_delete_restore_failure_names_file(monkeypatch):
+    for _ in range(3):
+        images.add_image(D, "8267", PNG)
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name == "8267-3.png" or self.name == "8267-1.png.deleting":
+            raise OSError("boom")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(images.ImageError) as ei:
+        images.stage_delete(D, "8267")
+    assert "無法還原：8267-1.png" in str(ei.value)
+    monkeypatch.setattr(Path, "rename", real)
+    assert images.list_images(D, "8267") == ["8267-2.png", "8267-3.png"]
+
+
+def test_image_lock_exists_and_is_plain_lock():
+    assert not images.IMAGE_LOCK.locked()
