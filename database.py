@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+import images
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "reports.db"
 
@@ -162,10 +164,12 @@ def update_schema(fields: list[str], template: str = "general") -> dict:
 
 
 def _row_to_report(row: sqlite3.Row) -> dict:
+    fields = json.loads(row["fields"])
     return {
         "id": row["id"],
         "date": row["date"],
-        "fields": json.loads(row["fields"]),
+        "fields": fields,
+        "images": images.list_images(row["date"], str(fields.get("Offense ID", "")).strip()),
         "field_order": json.loads(row["field_order"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -180,6 +184,25 @@ def _offense_exists(conn: sqlite3.Connection, offense_id: str, exclude_id: int |
         sql += " AND id != ?"
         params.append(exclude_id)
     return conn.execute(sql + " LIMIT 1", params).fetchone() is not None
+
+
+def _offense_count_on_date(conn: sqlite3.Connection, date: str, offense_id: str) -> int:
+    # 多帶 <> '' 讓 SQLite 走部分索引
+    return conn.execute(
+        f"SELECT COUNT(*) FROM reports WHERE date = ? AND {_OFFENSE_EXPR} = ? AND {_OFFENSE_EXPR} <> ''",
+        (date, offense_id),
+    ).fetchone()[0]
+
+
+def offense_count_on_date(date: str, offense_id: str) -> int:
+    with get_conn() as conn:
+        return _offense_count_on_date(conn, date, offense_id)
+
+
+def get_report(report_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+    return _row_to_report(row) if row else None
 
 
 def _normalize_fields(fields: dict) -> tuple[dict, str]:
@@ -232,14 +255,23 @@ def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict 
         with get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # 先確認存在：不存在的 id 一律回 None（404），不論 Offense ID 是否撞到別人
-            if conn.execute("SELECT 1 FROM reports WHERE id = ?", (report_id,)).fetchone() is None:
+            old = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
+            if old is None:
                 return None
             if offense_id and _offense_exists(conn, offense_id, exclude_id=report_id):
                 raise ValueError("Offense ID 已存在")
+            date = old["date"]
+            old_id = str(json.loads(old["fields"]).get("Offense ID", "")).strip()
+            rename = old_id != offense_id and bool(images.list_images(date, old_id))
+            if rename and _offense_count_on_date(conn, date, old_id) > 1:
+                raise images.ImageError("此 Offense ID 在同日有重複通報，請先處理重複資料")
             conn.execute(
                 "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
                 (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
             )
+            if rename:
+                # shortcut: rename 成功後若 commit 失敗，檔案已是新名；SQLite 本機 commit 幾乎不會失敗，真遇到再補反向改名
+                images.rename_all(date, old_id, offense_id)
             row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
     except sqlite3.IntegrityError:
         raise ValueError("Offense ID 已存在") from None
@@ -249,8 +281,15 @@ def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict 
 def delete_report(report_id: int) -> bool:
     """回傳是否真的刪到一筆。"""
     with get_conn() as conn:
-        cur = conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
-        return cur.rowcount > 0
+        row = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+        offense_id = str(json.loads(row["fields"]).get("Offense ID", "")).strip()
+        # 同日仍有同 ID 通報（舊資料重複）時圖片要留給它；刪圖失敗則例外讓交易回滾
+        if offense_id and _offense_count_on_date(conn, row["date"], offense_id) == 0:
+            images.delete_all(row["date"], offense_id)
+        return True
 
 
 def search_reports(q: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
