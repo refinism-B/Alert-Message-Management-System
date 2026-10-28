@@ -130,7 +130,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #no-results { text-align: center; color: #475569; padding: 40px; }
 /* Toast */
 #toast-container { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; pointer-events: none; }
-.toast { padding: 10px 16px; border-radius: 4px; font-size: 17px; opacity: 1; transition: opacity 0.3s ease; white-space: nowrap; }
+.toast { padding: 10px 16px; border-radius: 4px; font-size: 17px; opacity: 1; transition: opacity 0.3s ease; max-width: min(560px, calc(100vw - 40px)); overflow-wrap: anywhere; }
 .toast-success { background: #065f46; color: #6ee7b7; border: 1px solid #10b981; }
 .toast-error { background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; }
 /* Drawer overlay */
@@ -1026,7 +1026,8 @@ function refreshReportsMeta() {
 }
 
 async function deleteReport(id) {
-  if (!confirm('確定要刪除這筆通報嗎？')) return;
+  const n = document.getElementById(`card-${id}`)?._report.images?.length ?? 0;
+  if (!confirm(n ? `確定要刪除這筆通報嗎？將連同 ${n} 張截圖一併刪除。` : '確定要刪除這筆通報嗎？')) return;
   try {
     await api('DELETE', `/api/reports/${id}`);
   } catch (e) {
@@ -1195,7 +1196,7 @@ function renderAddForm(template) {
     schemaFields,
     async (div) => {
       const data = collectFormData(div);
-      if (!data) return;
+      if (!data || !checkPendingImageId(div)) return;
       let created;
       try {
         created = await api('POST', '/api/reports', { date: currentDate, ...data });
@@ -1252,7 +1253,7 @@ function editReport(id) {
     report.field_order,
     async (div) => {
       const data = collectFormData(div);
-      if (!data) return;
+      if (!data || !checkPendingImageId(div)) return;
       let updated;
       try {
         updated = await api('PUT', `/api/reports/${id}`, data);

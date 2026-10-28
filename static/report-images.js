@@ -4,7 +4,16 @@ const OFFENSE_ID_RE = /^[A-Za-z0-9_-]+$/;
 const OFFENSE_ID_BAD_MSG = 'Offense ID 含不允許的字元（僅限英數字、-、_），無法存圖';
 
 function seqOf(filename) {
-  return parseInt(filename.match(/-(\d+)\.png$/)[1], 10);
+  return parseInt(filename.match(/-([1-9][0-9]*)\.png$/)?.[1], 10);
+}
+
+// 有待上傳的新圖時，儲存前先驗 Offense ID，避免通報存了、圖片卻被後端拒收而遺失
+function checkPendingImageId(formDiv) {
+  if (!formDiv._imageEditor.getChanges().added.length) return true;
+  const id = formOffenseId(formDiv);
+  const msg = !id ? '請先填寫 Offense ID' : !OFFENSE_ID_RE.test(id) ? OFFENSE_ID_BAD_MSG : '';
+  if (msg) showToast(msg, 'error');
+  return !msg;
 }
 
 function imageUrl(reportId, filename) {
@@ -167,7 +176,7 @@ function buildImageEditor(existing, reportId, getOffenseId) {
     const maxSeq = kept.reduce((m, fn) => Math.max(m, seqOf(fn)), 0);
     const id = getOffenseId();
     added.forEach((b64, i) => {
-      list.appendChild(item(`data:image/png;base64,${b64}`, `新貼上（儲存後為 ${id}-${maxSeq + i + 1}.png）`, () => {
+      list.appendChild(item(`data:image/png;base64,${b64}`, id ? `新貼上（儲存後為 ${id}-${maxSeq + i + 1}.png）` : '新貼上（尚未填寫 Offense ID）', () => {
         added.splice(i, 1);
         render();
       }, true));

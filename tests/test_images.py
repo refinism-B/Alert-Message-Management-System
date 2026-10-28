@@ -177,3 +177,11 @@ def test_delete_image_oserror_becomes_image_error(monkeypatch):
     monkeypatch.setattr(Path, "unlink", boom)
     with pytest.raises(images.ImageError, match="8267-1.png"):
         images.delete_image(D, "8267", 1)
+
+
+def test_list_images_ignores_leading_zero_and_unicode_digits():
+    d = images.day_dir(D)
+    d.mkdir(parents=True)
+    for n in ("8267-1.png", "8267-01.png", "8267-\u0661.png"):
+        (d / n).write_bytes(PNG)
+    assert images.list_images(D, "8267") == ["8267-1.png"]
