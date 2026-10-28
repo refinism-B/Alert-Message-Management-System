@@ -125,3 +125,21 @@ def test_rename_all_rolls_back_on_oserror(monkeypatch):
     monkeypatch.setattr(Path, "rename", real)
     assert images.list_images(D, "8267") == ["8267-1.png", "8267-2.png"]
     assert images.list_images(D, "9000") == []
+
+
+def test_delete_all_is_atomic_when_rename_fails(monkeypatch):
+    images.add_image(D, "8267", PNG)
+    images.add_image(D, "8267", PNG)
+    real, calls = Path.rename, []
+
+    def flaky(self, target):
+        calls.append(self)
+        if len(calls) == 2:
+            raise OSError("locked")
+        return real(self, target)
+
+    with monkeypatch.context() as m:
+        m.setattr(Path, "rename", flaky)
+        with pytest.raises(images.ImageError):
+            images.delete_all(D, "8267")
+    assert images.list_images(D, "8267") == ["8267-1.png", "8267-2.png"]

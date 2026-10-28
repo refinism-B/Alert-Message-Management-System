@@ -71,11 +71,23 @@ def delete_image(date: str, offense_id: str, seq: int) -> bool:
 
 
 def delete_all(date: str, offense_id: str) -> None:
+    # 兩階段：先全部改成暫名（可整批還原），都成功才真的刪，避免刪到一半留下缺圖
+    d = day_dir(date)
+    moved: list[tuple[Path, Path]] = []
     for name in list_images(date, offense_id):
+        src, tmp = d / name, d / f"{name}.deleting"
         try:
-            (day_dir(date) / name).unlink()
+            src.rename(tmp)
         except OSError as e:
+            for s, t in reversed(moved):
+                t.rename(s)
             raise ImageError(f"刪除截圖失敗：{name}") from e
+        moved.append((src, tmp))
+    for _, tmp in moved:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass  # 殘留暫名檔不會被 list_images 列出，無害
 
 
 def rename_all(date: str, old_id: str, new_id: str) -> None:
