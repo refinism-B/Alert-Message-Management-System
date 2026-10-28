@@ -111,14 +111,20 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .image-editor { margin-bottom: 12px; }
 .img-list { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
 .img-item { position: relative; width: 176px; border: 1px solid #475569; border-radius: 4px; padding: 6px; background: #0f172a; }
-.img-item.new { border-color: #10b981; }
-.img-item img { width: 100%; height: 90px; object-fit: cover; border-radius: 3px; display: block; }
+.img-item.new { border-color: #3b82f6; }
+.img-item img { cursor: zoom-in; width: 100%; height: 90px; object-fit: cover; border-radius: 3px; display: block; }
 .img-name { margin-top: 4px; font-size: 13px; color: #94a3b8; overflow-wrap: anywhere; }
-.img-item.new .img-name { color: #6ee7b7; }
+.img-item.new .img-name { color: #93c5fd; }
 .img-remove { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid #7f1d1d; background: #450a0a; color: #fca5a5; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; }
-.paste-zone { width: 260px; height: 80px; border: 2px solid #475569; border-radius: 6px; color: #94a3b8; font-size: 15px; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; outline: none; }
+.paste-zone { width: 156px; height: 80px; border: 2px solid #475569; border-radius: 6px; color: #94a3b8; font-size: 15px; display: grid; place-items: center; cursor: pointer; user-select: none; outline: none; transition: border-color .3s, color .3s, background-color .3s, box-shadow .3s; }
 .paste-zone:focus { border-color: #3b82f6; color: #bfdbfe; background: rgba(59,130,246,.15); box-shadow: 0 0 0 4px rgba(59,130,246,.25); }
-.lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.8); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+/* both labels share one grid cell so they cross-fade */
+.paste-zone span { grid-area: 1 / 1; transition: opacity .3s; }
+.paste-zone .on, .paste-zone:focus .off { opacity: 0; }
+.paste-zone:focus .on { opacity: 1; }
+.lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.8); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; opacity: 0; transition: opacity .2s; }
+.lightbox.open { opacity: 1; }
+.lightbox:not(.open) { pointer-events: none; }
 .lb-top { width: min(960px, 92vw); display: flex; justify-content: space-between; align-items: center; color: #e2e8f0; font-size: 16px; }
 .lb-close { font-size: 26px; cursor: pointer; color: #cbd5e1; }
 .lb-stage { display: flex; align-items: center; gap: 18px; }
@@ -202,10 +208,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
   display: none;
   position: fixed;
   top: 50%;
-  left: 50%;
+  /* past min-width, keep left edge on screen instead of clipping it */
+  left: max(50%, 322px);
   transform: translate(-50%, -50%) scale(1);
-  width: 644px;
-  max-width: 90vw;
+  width: 60vw;
+  min-width: 644px;
   max-height: 85vh;
   overflow-y: auto;
   z-index: 201;
@@ -404,7 +411,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
   <div id="ip-stats-dialog" role="dialog" aria-label="IP 統計">
     <div id="ip-stats-dialog-header">
       <span id="ip-stats-title"></span>
-      <button class="btn btn-secondary btn-sm" onclick="closeIpStats()">✕ 關閉</button>
+      <button class="btn btn-danger btn-sm" onclick="closeIpStats()">✕ 關閉</button>
     </div>
     <div id="ip-stats-root"></div>
   </div>

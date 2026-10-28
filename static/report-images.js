@@ -44,7 +44,7 @@ function buildThumbs(report) {
       more.textContent = `+${images.length - 2}`;
       t.appendChild(more);
     }
-    t.onclick = () => openLightbox(report, i);
+    t.onclick = () => openLightbox(images.map(fn => ({ src: imageUrl(report.id, fn), name: fn })), i);
     wrap.appendChild(t);
   });
   return wrap;
@@ -55,13 +55,17 @@ function buildThumbs(report) {
 let lightboxEl = null;
 
 function closeLightbox() {
-  lightboxEl?.remove();
+  const el = lightboxEl;
   lightboxEl = null;
+  if (!el) return;
+  el.classList.remove('open');
+  el.addEventListener('transitionend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 300); // fallback if transitionend never fires
 }
 
-function openLightbox(report, startIndex) {
+// items: [{ src, name }]
+function openLightbox(items, startIndex) {
   closeLightbox();
-  const images = report.images;
   let idx = startIndex;
 
   const overlay = document.createElement('div');
@@ -85,26 +89,38 @@ function openLightbox(report, startIndex) {
   stage.append(prev, img, next);
   overlay.append(top, stage);
 
-  const show = (i) => {
-    idx = (i + images.length) % images.length;
-    img.src = imageUrl(report.id, images[idx]);
-    title.textContent = `${images[idx]}　（${idx + 1} / ${images.length}）`;
+  let slideDir = 0;
+  // slide in from the side the user moved toward, once the new image has loaded
+  img.onload = () => {
+    if (!slideDir) return;
+    img.getAnimations().forEach(a => a.cancel());
+    img.animate([{ opacity: 0, transform: `translateX(${slideDir * 60}px)` }, { opacity: 1, transform: 'none' }],
+      { duration: 300, easing: 'ease-out' });
+    slideDir = 0;
   };
-  prev.onclick = (e) => { e.stopPropagation(); show(idx - 1); };
-  next.onclick = (e) => { e.stopPropagation(); show(idx + 1); };
+  const show = (i, dir = 0) => {
+    slideDir = dir;
+    idx = (i + items.length) % items.length;
+    img.src = items[idx].src;
+    title.textContent = `${items[idx].name}　（${idx + 1} / ${items.length}）`;
+  };
+  prev.onclick = (e) => { e.stopPropagation(); show(idx - 1, -1); };
+  next.onclick = (e) => { e.stopPropagation(); show(idx + 1, 1); };
   close.onclick = closeLightbox;
   overlay.onclick = (e) => {
     if (e.target === overlay || e.target === stage) closeLightbox();
   };
   overlay._onKey = (e) => {
-    if (e.key === 'ArrowLeft') show(idx - 1);
-    else if (e.key === 'ArrowRight') show(idx + 1);
+    if (e.key === 'ArrowLeft') show(idx - 1, -1);
+    else if (e.key === 'ArrowRight') show(idx + 1, 1);
     else if (e.key !== 'Escape') return;
     if (e.key === 'Escape') closeLightbox();
     e.stopImmediatePropagation();
   };
   show(idx);
   document.body.appendChild(overlay);
+  overlay.getBoundingClientRect(); // commit opacity:0 so the fade-in transition runs
+  overlay.classList.add('open');
   lightboxEl = overlay;
 }
 
@@ -140,16 +156,23 @@ function buildImageEditor(existing, reportId, getOffenseId) {
   const zone = document.createElement('div');
   zone.className = 'paste-zone';
   zone.tabIndex = 0;
-  zone.textContent = '點擊後貼上圖片';
-  zone.onfocus = () => { zone.textContent = '貼上圖片'; };
-  zone.onblur = () => { zone.textContent = '點擊後貼上圖片'; };
+  const off = document.createElement('span');
+  off.className = 'off';
+  off.textContent = '點擊後貼上圖片';
+  const on = document.createElement('span');
+  on.className = 'on';
+  on.textContent = '貼上圖片';
+  zone.append(off, on);
   root.append(list, zone);
 
   const removedSeqs = [];
   const added = [];
   let kept = existing.slice();
 
+  let shown = []; // current tiles in display order, for the lightbox
+
   function item(src, name, onRemove, isNew) {
+    const index = shown.push({ src, name }) - 1;
     const el = document.createElement('div');
     el.className = 'img-item' + (isNew ? ' new' : '');
     const nameEl = document.createElement('div');
@@ -160,12 +183,15 @@ function buildImageEditor(existing, reportId, getOffenseId) {
     x.className = 'img-remove';
     x.textContent = '✕';
     x.onclick = onRemove;
-    el.append(makeImg(src), nameEl, x);
+    const pic = makeImg(src);
+    pic.onclick = () => openLightbox(shown, index);
+    el.append(pic, nameEl, x);
     return el;
   }
 
   function render() {
     list.replaceChildren();
+    shown = [];
     kept.forEach(fn => {
       list.appendChild(item(imageUrl(reportId, fn), fn, () => {
         removedSeqs.push(seqOf(fn));
@@ -176,7 +202,7 @@ function buildImageEditor(existing, reportId, getOffenseId) {
     const maxSeq = kept.reduce((m, fn) => Math.max(m, seqOf(fn)), 0);
     const id = getOffenseId();
     added.forEach((b64, i) => {
-      list.appendChild(item(`data:image/png;base64,${b64}`, id ? `新貼上（儲存後為 ${id}-${maxSeq + i + 1}.png）` : '新貼上（尚未填寫 Offense ID）', () => {
+      list.appendChild(item(`data:image/png;base64,${b64}`, id ? `${id}-${maxSeq + i + 1}.png` : '尚未填寫 Offense ID', () => {
         added.splice(i, 1);
         render();
       }, true));
