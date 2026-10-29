@@ -134,6 +134,17 @@ def update_report(report_id: int, body: models.ReportUpdate) -> models.ReportRes
     return result
 
 
+@app.put("/api/reports/{report_id}/date")
+def update_report_date(report_id: int, body: models.ReportDateUpdate) -> models.ReportResponse:
+    try:
+        result = database.update_report(report_id, date=body.date)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return result
+
+
 @app.delete("/api/reports/{report_id}")
 def delete_report(report_id: int) -> dict:
     try:

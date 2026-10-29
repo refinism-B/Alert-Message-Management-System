@@ -32,6 +32,10 @@ class ReportUpdate(BaseModel):
     field_order: list[str]
 
 
+class ReportDateUpdate(BaseModel):
+    date: DateStr
+
+
 class ReportResponse(BaseModel):
     id: int
     date: str

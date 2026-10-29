@@ -164,13 +164,22 @@ def update_schema(fields: list[str], template: str = "general") -> dict:
     return {"fields": fields, "updated_at": now}
 
 
+def _display_images(date: str, offense_id: str) -> list[str]:
+    # 只用於顯示：資料夾讀不到（權限、被鎖）時當作沒有圖，不讓整天的列表或搜尋 500；會動檔案的路徑仍照常報錯
+    try:
+        return images.list_images(date, offense_id)
+    except OSError as e:
+        logging.warning("讀取截圖資料夾失敗（%s）：%s", date, e)
+        return []
+
+
 def _row_to_report(row: sqlite3.Row) -> dict:
     fields = json.loads(row["fields"])
     return {
         "id": row["id"],
         "date": row["date"],
         "fields": fields,
-        "images": images.list_images(row["date"], str(fields.get("Offense ID", "")).strip()),
+        "images": _display_images(row["date"], str(fields.get("Offense ID", "")).strip()),
         "field_order": json.loads(row["field_order"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -249,8 +258,11 @@ def get_dates() -> list[str]:
     return [r["date"] for r in rows]
 
 
-def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict | None:
-    fields, offense_id = _normalize_fields(fields)
+def update_report(report_id: int, fields: dict | None = None, field_order: list[str] | None = None,
+                  date: str | None = None) -> dict | None:
+    """fields 為 None 時沿用原欄位（只改日期）；date 為 None 時維持原日期。截圖跟著 Offense ID／日期改名搬移。"""
+    if fields is not None:
+        fields, offense_id = _normalize_fields(fields)
     now = _now()
     renamed = False
     try:
@@ -259,28 +271,39 @@ def update_report(report_id: int, fields: dict, field_order: list[str]) -> dict 
                 with get_conn() as conn:
                     conn.execute("BEGIN IMMEDIATE")
                     # 先確認存在：不存在的 id 一律回 None（404），不論 Offense ID 是否撞到別人
-                    old = conn.execute("SELECT date, fields FROM reports WHERE id = ?", (report_id,)).fetchone()
+                    old = conn.execute("SELECT date, fields, field_order FROM reports WHERE id = ?", (report_id,)).fetchone()
                     if old is None:
                         return None
-                    if offense_id and _offense_exists(conn, offense_id, exclude_id=report_id):
-                        raise ValueError("Offense ID 已存在")
-                    date = old["date"]
+                    if fields is None:
+                        fields, field_order = json.loads(old["fields"]), json.loads(old["field_order"])
+                        offense_id = str(fields.get("Offense ID", "")).strip()
+                    old_date = old["date"]
+                    new_date = date or old_date
                     old_id = str(json.loads(old["fields"]).get("Offense ID", "")).strip()
-                    rename = old_id != offense_id and bool(images.list_images(date, old_id))
-                    if rename and _offense_count_on_date(conn, date, old_id) > 1:
+                    # 只在 ID 有變時查重：舊資料可能早有重複 ID，不改 ID 的編輯／改日期不該被擋
+                    if offense_id and offense_id != old_id and _offense_exists(conn, offense_id, exclude_id=report_id):
+                        raise ValueError("Offense ID 已存在")
+                    # 截圖以（日期, Offense ID）命名，目標日已有同 ID 通報就會共用檔名
+                    if offense_id and new_date != old_date and _offense_count_on_date(conn, new_date, offense_id) > 0:
+                        raise ValueError(f"{new_date} 已有相同 Offense ID 的通報，無法移過去")
+                    rename = (old_id != offense_id or new_date != old_date) and bool(images.list_images(old_date, old_id))
+                    if rename and _offense_count_on_date(conn, old_date, old_id) > 1:
                         raise images.ImageError("此 Offense ID 在同日有重複通報，請先處理重複資料")
                     conn.execute(
-                        "UPDATE reports SET fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
-                        (json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
+                        "UPDATE reports SET date = ?, fields = ?, field_order = ?, updated_at = ? WHERE id = ?",
+                        (new_date, json.dumps(fields, ensure_ascii=False), json.dumps(field_order, ensure_ascii=False), now, report_id),
                     )
                     if rename:
-                        images.rename_all(date, old_id, offense_id)
+                        images.rename_all(old_date, old_id, offense_id, new_date=new_date)
                         renamed = True
                     row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
             except Exception:
                 if renamed:
-                    # DB 已 rollback 回舊 ID：檔名改回去，維持與 DB 一致
-                    images.rename_all(date, offense_id, old_id)
+                    # DB 已 rollback 回舊 ID／日期：檔案搬回去，維持與 DB 一致；還原失敗只記 log，不蓋掉原始錯誤
+                    try:
+                        images.rename_all(new_date, offense_id, old_id, new_date=old_date)
+                    except Exception:
+                        logging.exception("截圖無法搬回 %s/%s（現位於 %s/%s）", old_date, old_id, new_date, offense_id)
                 raise
     except sqlite3.IntegrityError:
         raise ValueError("Offense ID 已存在") from None

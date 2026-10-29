@@ -22,6 +22,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .btn-secondary:hover { background: #334155; }
 .btn-danger { background: #450a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
 .btn-danger:hover { background: #7f1d1d; }
+#clear-search-btn:hover { background: #dc2626; border-color: #ef4444; color: #fff; }
 .btn-success { background: #064e3b; color: #6ee7b7; border: none; }
 .btn-success:hover { background: #065f46; }
 .btn-sm { padding: 8px 16px; font-size: 16px; }
@@ -64,32 +65,6 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .report-card.editing { border-color: #3b82f6; display: block; }
 .form-container.report-card { display: block; padding: 14px; }
 .card-body { padding: 14px; flex: 1; min-width: 0; }
-@keyframes elastic-select {
-  0%   { transform: scale(1); }
-  30%  { transform: scale(0.92); }
-  70%  { transform: scale(1.04); }
-  100% { transform: scale(1); }
-}
-.select-zone {
-  width: 44px;
-  min-width: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-left: 1px solid #334155;
-  cursor: pointer;
-  background: #1e293b;
-  color: #475569;
-  font-size: 16px;
-  user-select: none;
-  transition: background 0.15s ease, color 0.15s ease;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  letter-spacing: 0.1em;
-}
-.select-zone:hover { background: #273549; color: #94a3b8; }
-.select-zone.selected { background: #1e3a8a; color: #93c5fd; border-left-color: #3b82f6; }
-.select-zone.animating { animation: elastic-select 0.28s ease; }
 .report-fields { display: grid; grid-template-columns: minmax(140px, max-content) 1fr; column-gap: 12px; row-gap: 4px; font-size: 17px; margin-bottom: 10px; }
 .field-label { color: #64748b; white-space: nowrap; }
 .field-value { color: #e2e8f0; min-width: 0; overflow-wrap: anywhere; }
@@ -98,6 +73,16 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .field-row .btn-danger { padding: 3px 5px; font-size: 14px; }
 .key-label { font-size: 17px; color: #cbd5e1; padding: 4px 8px; }
 .drag-handle { cursor: grab; color: #475569; text-align: center; user-select: none; }
+.drag-handle:active { cursor: grabbing; }
+.card-drag { width: 24px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-right: 1px solid #334155; font-size: 18px; }
+.card-drag:hover { color: #94a3b8; background: #273549; }
+.dragging { opacity: 0.35; }
+/* 事件卡拖曳影像：縮小、只留左側（真正有意義的是左邊那塊），右側從 1/3 處淡出 */
+.drag-ghost { position: fixed; left: 0; top: 0; margin: 0; z-index: 9999; pointer-events: none; transform-origin: 0 0; opacity: 0.9; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  -webkit-mask-image: linear-gradient(to right, #000 33%, transparent 100%); mask-image: linear-gradient(to right, #000 33%, transparent 100%); }
+.date-item.drop-target { background: #1e3a8a; color: #fff; outline: 2px solid #3b82f6; outline-offset: -2px; }
+.date-change { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.date-change input { width: auto; color-scheme: dark; }
 .card-actions { display: flex; gap: 6px; }
 .edit-label { font-size: 15px; color: #3b82f6; margin-bottom: 8px; }
 .report-card.editing .edit-label { text-align: center; padding: 10px 14px 6px; margin-bottom: 0; }
@@ -243,8 +228,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .tab-btn:hover { background: #273549; color: #e2e8f0; }
 .tab-btn.active { background: #1e40af; border-color: #1e40af; color: #fff; }
 
-/* Main-header search row (relocated from topbar) */
-#main-header-search { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 事件搜尋放頂部列最右側，兩個分頁共用 */
+#topbar-search { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* IP lookup page (filled in Task 9) */
 /* body 是固定 100vh 的 flex 容器，分頁內容超出時文件本身不會捲動。
@@ -346,6 +331,15 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
     <button id="tab-btn-reports" class="tab-btn active" onclick="switchAppTab('reports')">事件管理</button>
     <button id="tab-btn-lookup" class="tab-btn" onclick="switchAppTab('lookup')">IP查詢</button>
   </div>
+  <!-- 任何分頁都能搜尋事件；搜尋時自動切回事件管理 -->
+  <div id="topbar-search">
+    <input id="search-input" type="text" placeholder="搜尋 IP / Offense ID...">
+    <span class="sep">日期區間</span>
+    <input id="date-from" class="date-input" type="date">
+    <span class="sep">～</span>
+    <input id="date-to" class="date-input" type="date">
+    <button class="btn btn-primary btn-sm" onclick="doSearch()">搜尋</button>
+  </div>
 </div>
 
 <div id="reports-tab" class="app-tab">
@@ -368,20 +362,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
           <span id="main-title">載入中...</span>
           <button id="ip-stats-btn" class="btn btn-secondary btn-sm" style="display:none" onclick="openIpStats()">IP統計</button>
         </div>
-        <div id="main-header-search">
-          <input id="search-input" type="text" placeholder="搜尋 IP / Offense ID...">
-          <span class="sep">日期區間</span>
-          <input id="date-from" class="date-input" type="date">
-          <span class="sep">～</span>
-          <input id="date-to" class="date-input" type="date">
-          <button class="btn btn-primary btn-sm" onclick="doSearch()">搜尋</button>
-          <button id="clear-search-btn" class="btn btn-secondary btn-sm" style="display:none" onclick="clearSearch()">✕ 清除</button>
-        </div>
         <div id="main-actions">
           <button class="btn btn-primary btn-sm" onclick="openAddForm()">＋ 新增通報</button>
+          <button id="clear-search-btn" class="btn btn-danger btn-sm" style="display:none" onclick="clearSearch()">✕ 清除</button>
+          <button id="copy-all-btn" class="btn btn-success btn-sm" onclick="copyAll()">全選並複製</button>
           <button id="sort-btn" class="btn btn-secondary btn-sm" onclick="toggleSort()">排序↓</button>
-          <button id="select-all-btn" class="btn btn-secondary btn-sm" onclick="toggleSelectAll()">全選</button>
-          <button id="copy-selected-btn" class="btn btn-success btn-sm" onclick="copySelected()" disabled>複製選取事件</button>
           <button class="btn btn-secondary btn-sm" onclick="openSchemaDrawer()">欄位管理</button>
         </div>
       </div>
@@ -602,6 +587,24 @@ function buildDateItem(date, text) {
   item.dataset.date = date;
   item.textContent = text;
   item.onclick = () => selectDate(date);
+  // 只接受拖過來的事件卡（欄位列的拖曳不算）
+  item.ondragover = e => {
+    if (!e.dataTransfer.types.includes(REPORT_DRAG_TYPE)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    item.classList.add('drop-target');
+  };
+  item.ondragleave = () => item.classList.remove('drop-target');
+  item.ondrop = e => {
+    item.classList.remove('drop-target');
+    endCardGhost(); // 卡片放下後會被移除，不靠它的 dragend 收拾
+    const id = parseInt(e.dataTransfer.getData(REPORT_DRAG_TYPE), 10);
+    // 只認本頁開始的拖曳：其他網頁可以偽造同名 MIME type 的拖曳資料
+    if (!id || id !== draggingReportId) return;
+    draggingReportId = null;
+    e.preventDefault();
+    moveReportDate(id, date);
+  };
   return item;
 }
 
@@ -639,6 +642,10 @@ async function loadDates() {
     count.textContent = ` (${g.dates.length})`;
     header.append(arrow, label, count);
     header.onclick = () => toggleDateGroup(group);
+    // 拖著事件卡經過收合的月份就展開，才放得到裡面的日期
+    header.ondragenter = e => {
+      if (e.dataTransfer.types.includes(REPORT_DRAG_TYPE) && !expandedGroups.has(g.ym)) toggleDateGroup(group);
+    };
 
     const items = document.createElement('div');
     items.className = 'date-group-items';
@@ -703,8 +710,7 @@ async function selectDate(date) {
   isSearchMode = false;
   document.getElementById('sidebar').classList.remove('disabled');
   document.getElementById('clear-search-btn').style.display = 'none';
-  document.getElementById('select-all-btn').style.display = '';
-  document.getElementById('copy-selected-btn').style.display = '';
+  document.getElementById('copy-all-btn').style.display = '';
   document.getElementById('ip-stats-btn').style.display = '';
   currentReports = reports;
   renderReports(reports);
@@ -736,11 +742,11 @@ async function doSearch() {
     return;
   }
   if (seq !== viewSeq) return;
+  switchAppTab('reports'); // 搜尋列在頂部，從 IP 查詢分頁搜尋也要切回來看結果
   isSearchMode = true;
   document.getElementById('sidebar').classList.add('disabled');
   document.getElementById('clear-search-btn').style.display = '';
-  document.getElementById('select-all-btn').style.display = 'none';
-  document.getElementById('copy-selected-btn').style.display = 'none';
+  document.getElementById('copy-all-btn').style.display = 'none';
   document.getElementById('ip-stats-btn').style.display = 'none';
   searchLabel = q ? `搜尋「${q}」` : '日期區間搜尋';
   renderReports(data.reports, true);
@@ -915,8 +921,6 @@ function toggleSort() {
 function renderReports(reports, searchMode = false) {
   const container = document.getElementById('reports-container');
   container.innerHTML = '';
-  const copyBtn = document.getElementById('copy-selected-btn');
-  if (copyBtn) copyBtn.disabled = true;
   if (reports.length === 0) {
     container.innerHTML = '<div id="no-results">無通報紀錄</div>';
     return;
@@ -954,22 +958,34 @@ function buildCard(report, showDate = false) {
   actions.append(
     makeButton('btn btn-secondary btn-sm', '複製', () => copyReport(report.id)),
     makeButton('btn btn-secondary btn-sm', '編輯', () => editReport(report.id)),
+    makeButton('btn btn-secondary btn-sm', '改日期', () => toggleDateChange(card)),
     makeButton('btn btn-danger btn-sm', '刪除', () => deleteReport(report.id))
   );
   body.append(fieldsEl, actions);
+  // 搜尋模式側欄停用、沒有可放的日期，就不給把手
+  if (!showDate) {
+    const handle = document.createElement('div');
+    handle.className = 'drag-handle card-drag';
+    handle.textContent = '⠿';
+    handle.title = '拖到左側日期即可改日期';
+    handle.draggable = true;
+    handle.ondragstart = e => {
+      e.dataTransfer.setData(REPORT_DRAG_TYPE, String(report.id));
+      e.dataTransfer.effectAllowed = 'move';
+      draggingReportId = report.id;
+      startCardGhost(e, card);
+    };
+    handle.ondragend = () => {
+      card.classList.remove('dragging');
+      draggingReportId = null;
+      endCardGhost();
+    };
+    card.appendChild(handle);
+  }
   card.appendChild(body);
 
   const thumbs = buildThumbs(report);
   if (thumbs) card.appendChild(thumbs);
-
-  if (!showDate) {
-    const zone = document.createElement('div');
-    zone.className = 'select-zone';
-    zone.textContent = '選取';
-    zone.dataset.id = report.id;
-    zone.onclick = () => toggleSelectZone(zone);
-    card.appendChild(zone);
-  }
 
   card._report = report;
   card._showDate = showDate;
@@ -994,42 +1010,23 @@ async function copyReport(id) {
   await copyText(formatReport(card._report));
 }
 
-function toggleSelectZone(zone) {
-  zone.classList.toggle('selected');
-  zone.classList.add('animating');
-  zone.addEventListener('animationend', () => zone.classList.remove('animating'), { once: true });
-  updateCopyBtn();
+// 依畫面上的排序複製當天全部通報
+async function copyAll() {
+  const cards = [...document.querySelectorAll('#reports-container > .report-card')];
+  if (!cards.length) {
+    showToast('沒有可複製的通報', 'error');
+    return;
+  }
+  await copyText(cards.map(c => formatReport(c._report)).join('\n\n\n'));
 }
 
-function updateCopyBtn() {
-  const any = document.querySelectorAll('.select-zone.selected').length > 0;
-  document.getElementById('copy-selected-btn').disabled = !any;
-}
-
-function toggleSelectAll() {
-  const zones = Array.from(document.querySelectorAll('.select-zone'));
-  const allSelected = zones.length > 0 && zones.every(z => z.classList.contains('selected'));
-  zones.forEach(z => z.classList.toggle('selected', !allSelected));
-  updateCopyBtn();
-}
-
-async function copySelected() {
-  const selected = Array.from(document.querySelectorAll('.select-zone.selected'));
-  if (!selected.length) return;
-  const ids = new Set(selected.map(z => parseInt(z.dataset.id)));
-  const reports = currentReports.filter(r => ids.has(r.id));
-  const text = reports.map(r => formatReport(r)).join('\n\n\n');
-  await copyText(text);
-}
-
-// 卡片增減後同步標題、空狀態與複製鈕（不重抓整個日期，搜尋模式也不會被踢出）
+// 卡片增減後同步標題與空狀態（不重抓整個日期，搜尋模式也不會被踢出）
 function refreshReportsMeta() {
   const container = document.getElementById('reports-container');
   if (!container.querySelector(':scope > .report-card')) {
     container.innerHTML = '<div id="no-results">無通報紀錄</div>';
   }
   updateMainTitle();
-  updateCopyBtn();
 }
 
 async function deleteReport(id) {
@@ -1045,6 +1042,99 @@ async function deleteReport(id) {
   document.getElementById(`card-${id}`)?.remove();
   refreshReportsMeta();
   showToast('已刪除');
+  await loadDates();
+}
+
+const REPORT_DRAG_TYPE = 'application/x-report-id';
+let draggingReportId = null;
+
+// 拖曳影像用整個物件（預設只有小小的把手），游標抓在原本按下的位置；原物件淡化留作原位提示
+function startDragGhost(e, el) {
+  const rect = el.getBoundingClientRect();
+  e.dataTransfer.setDragImage(el, e.clientX - rect.left, e.clientY - rect.top);
+  setTimeout(() => el.classList.add('dragging')); // 同步加的話拖曳影像也會跟著變淡
+}
+
+// 事件卡改用自繪拖曳影像：瀏覽器原生影像無法縮放，太大時還會自動上下淡化
+const CARD_GHOST_SCALE = 0.65;
+const EMPTY_DRAG_IMG = new Image();
+EMPTY_DRAG_IMG.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+let cardGhost = null;
+
+function moveCardGhost(x, y) {
+  const [ox, oy] = cardGhost._offset;
+  cardGhost.style.transform = `translate(${x - ox}px, ${y - oy}px) scale(${CARD_GHOST_SCALE})`;
+}
+
+function startCardGhost(e, card) {
+  endCardGhost();
+  const rect = card.getBoundingClientRect();
+  const ghost = card.cloneNode(true);
+  ghost.removeAttribute('id');
+  ghost.classList.add('drag-ghost');
+  ghost.style.width = `${rect.width}px`;
+  ghost._offset = [(e.clientX - rect.left) * CARD_GHOST_SCALE, (e.clientY - rect.top) * CARD_GHOST_SCALE];
+  document.body.appendChild(ghost);
+  cardGhost = ghost;
+  moveCardGhost(e.clientX, e.clientY);
+  e.dataTransfer.setDragImage(EMPTY_DRAG_IMG, 0, 0);
+  setTimeout(() => card.classList.add('dragging'));
+}
+
+function endCardGhost() {
+  cardGhost?.remove();
+  cardGhost = null;
+}
+
+document.addEventListener('dragover', e => { if (cardGhost) moveCardGhost(e.clientX, e.clientY); });
+
+function toggleDateChange(card) {
+  const existing = card.querySelector('.date-change');
+  if (existing) { existing.remove(); return; }
+  const row = document.createElement('div');
+  row.className = 'date-change';
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.className = 'field-input';
+  input.value = card._report.date;
+  row.append(
+    input,
+    makeButton('btn btn-primary btn-sm', '確定', () => {
+      if (input.value) moveReportDate(card._report.id, input.value);
+      else showToast('請選擇日期', 'error');
+    }),
+    makeButton('btn btn-secondary btn-sm', '取消', () => row.remove())
+  );
+  card.querySelector('.card-body').appendChild(row);
+  input.focus();
+}
+
+async function moveReportDate(id, date) {
+  const card = document.getElementById(`card-${id}`);
+  if (!card || card._report.date === date) {
+    card?.querySelector('.date-change')?.remove();
+    return;
+  }
+  // 送出期間鎖住卡片按鈕，免得回應回來移除卡片時，期間開始的編輯被丟掉
+  const buttons = [...card.querySelectorAll('button')];
+  buttons.forEach(b => { b.disabled = true; });
+  let updated;
+  try {
+    updated = await api('PUT', `/api/reports/${id}/date`, { date });
+  } catch (e) {
+    buttons.forEach(b => { b.disabled = false; });
+    showToast(`改日期失敗：${e.message}`, 'error');
+    return;
+  }
+  // 比照刪除：只動這張卡片，不重繪整頁，其他卡片未存的編輯不會被丟掉
+  if (isSearchMode) {
+    restoreCard(card, updated);
+  } else {
+    currentReports = currentReports.filter(r => r.id !== id);
+    card.remove();
+    refreshReportsMeta();
+  }
+  showToast(`已移至 ${date}`);
   await loadDates();
 }
 
@@ -1113,18 +1203,29 @@ function deleteFieldRow(btn) {
 function bindDrag(container) {
   const rows = container.querySelectorAll('.field-row');
   rows.forEach(row => {
-    row.querySelector('.drag-handle').ondragstart = e => {
+    const handle = row.querySelector('.drag-handle');
+    handle.ondragstart = e => {
+      e.dataTransfer.setData('text/plain', '');
       e.dataTransfer.effectAllowed = 'move';
       container._dragging = row;
+      startDragGhost(e, row);
     };
-    row.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
-    row.ondrop = e => {
-      e.preventDefault();
+    handle.ondragend = () => {
+      row.classList.remove('dragging');
+      container._dragging = null;
+    };
+    // 拖曳途中即時換位，看得到放開後會落在哪；放開時位置已經就定
+    row.ondragover = e => {
       const dragging = container._dragging;
-      if (dragging && dragging !== row) {
-        row.parentNode.insertBefore(dragging, row);
-      }
+      if (!dragging) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragging === row) return;
+      const rect = row.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      row.parentNode.insertBefore(dragging, after ? row.nextSibling : row);
     };
+    row.ondrop = e => e.preventDefault();
   });
 }
 
@@ -1206,7 +1307,8 @@ function renderAddForm(template) {
       if (!data || !checkPendingImageId(div)) return;
       let created;
       try {
-        created = await api('POST', '/api/reports', { date: currentDate, ...data });
+        // 一律歸到存檔當天，不用側欄選中的日期（免得靜悄悄存錯天）；要改用卡片的「改日期」
+        created = await api('POST', '/api/reports', { date: todayStr(), ...data });
       } catch (e) {
         showToast(`儲存失敗：${e.message}`, 'error');
         return;
@@ -1216,7 +1318,7 @@ function renderAddForm(template) {
       if (errors.length) showToast(`截圖處理失敗：${errors.join('；')}`, 'error');
       else showToast('已成功儲存');
       await loadDates();
-      await selectDate(currentDate);
+      await selectDate(created.date);
       document.getElementById(`card-${created.id}`)?.classList.add('card-slide-in');
     },
     closeAddModal,
@@ -1240,7 +1342,6 @@ function openAddForm() {
 // 取消／儲存都只原地替換這張卡片，不重抓日期，搜尋結果也保留
 function restoreCard(card, report) {
   card.replaceWith(buildCard(report, card._showDate));
-  updateCopyBtn();
 }
 
 function editReport(id) {

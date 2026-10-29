@@ -64,17 +64,26 @@ def add_image(date: str, offense_id: str, data: bytes) -> str:
     d = day_dir(date)
     try:
         d.mkdir(parents=True, exist_ok=True)
-        # 並行上傳可能算出同一序號：排他建立失敗就重算，不覆蓋
-        for _ in range(5):
-            existing = list_images(date, offense_id)
-            seq = seq_of(existing[-1]) + 1 if existing else 1
+        existing = list_images(date, offense_id)
+        seq = seq_of(existing[-1]) + 1 if existing else 1
+        # 檔名已被佔用（並行上傳，或手動放入、未被列出的 X-n.PNG 在 Windows 上同名）就往後跳號，不覆蓋
+        for _ in range(100):
             name = f"{offense_id}-{seq}.png"
             try:
-                with open(d / name, "xb") as f:
-                    f.write(data)
-                return name
-            except FileExistsError:
+                f = open(d / name, "xb")
+            except OSError:
+                # 已存在（含同名資料夾，Windows 上報 PermissionError）就跳號；其他錯誤照常往外拋
+                if not (d / name).exists():
+                    raise
+                seq += 1
                 continue
+            try:
+                with f:
+                    f.write(data)
+            except OSError:
+                (d / name).unlink(missing_ok=True)  # 寫一半（如磁碟滿）不留殘檔，也不當成佔用而跳號
+                raise
+            return name
     except OSError as e:
         raise ImageError(f"儲存截圖失敗：{e.strerror or e}") from e
     raise ImageError("儲存截圖失敗：序號衝突，請重試")
@@ -136,21 +145,24 @@ def delete_all(date: str, offense_id: str) -> None:
     finish_delete(stage_delete(date, offense_id))
 
 
-def rename_all(date: str, old_id: str, new_id: str) -> None:
+def rename_all(date: str, old_id: str, new_id: str, new_date: str | None = None) -> None:
+    """改 Offense ID 及／或搬到 new_date 的資料夾；序號不變，失敗整批還原。"""
     names = list_images(date, old_id)
     if not names:
         return
     check_offense_id(new_id)
-    d = day_dir(date)
-    pairs = [(d / n, d / f"{new_id}-{seq_of(n)}.png") for n in names]
+    d, nd = day_dir(date), day_dir(new_date or date)
+    pairs = [(d / n, nd / f"{new_id}-{seq_of(n)}.png") for n in names]
     for _, dst in pairs:
         if dst.exists():
-            raise ImageError(f"目標檔名已存在：{dst.name}，無法改名")
+            raise ImageError(f"目標檔名已存在：{dst.parent.name}/{dst.name}，無法改名")
     done: list[tuple[Path, Path]] = []
     try:
+        nd.mkdir(parents=True, exist_ok=True)
         for src, dst in pairs:
             src.rename(dst)
             done.append((src, dst))
     except OSError as e:
         failed = _restore(done)
-        raise ImageError(_fail_msg(f"截圖改名失敗：{e}", failed) if failed else f"截圖改名失敗，已還原：{e}") from e
+        reason = e.strerror or type(e).__name__  # 不帶 str(e)：裡面有完整絕對路徑
+        raise ImageError(_fail_msg(f"截圖改名失敗：{reason}", failed) if failed else f"截圖改名失敗，已還原：{reason}") from e
