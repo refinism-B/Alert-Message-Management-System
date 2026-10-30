@@ -84,9 +84,12 @@ function openLightbox(items, startIndex) {
   next.className = 'lb-arrow';
   next.textContent = '›';
   const img = document.createElement('img');
+  const frame = document.createElement('div');
+  frame.className = 'lb-frame';
+  frame.append(img);
   const stage = document.createElement('div');
   stage.className = 'lb-stage';
-  stage.append(prev, img, next);
+  stage.append(prev, frame, next);
   overlay.append(top, stage);
 
   let slideDir = 0;
@@ -98,7 +101,23 @@ function openLightbox(items, startIndex) {
       { duration: 300, easing: 'ease-out' });
     slideDir = 0;
   };
+  // 點一下以點擊處為中心放大 2 倍，再點一下還原；放大中滑鼠移到哪就看哪
+  // 用未變形的版面位置（offset*，不受縮放與滑入動畫影響）每次重算，視窗縮放後也準
+  const aim = (e) => {
+    const f = frame.getBoundingClientRect();
+    const x = Math.min(Math.max(e.clientX - f.left - img.offsetLeft, 0), img.offsetWidth);
+    const y = Math.min(Math.max(e.clientY - f.top - img.offsetTop, 0), img.offsetHeight);
+    img.style.transformOrigin = `${x}px ${y}px`;
+  };
+  img.onclick = (e) => {
+    img.getAnimations().forEach(a => a.finish()); // 滑入動畫中點擊：先結束動畫，否則它會蓋掉放大
+    const zoom = !img.classList.contains('zoomed');
+    if (zoom) aim(e);
+    img.classList.toggle('zoomed', zoom);
+  };
+  img.onmousemove = (e) => { if (img.classList.contains('zoomed')) aim(e); };
   const show = (i, dir = 0) => {
+    img.classList.remove('zoomed');
     slideDir = dir;
     idx = (i + items.length) % items.length;
     img.src = items[idx].src;
@@ -108,7 +127,7 @@ function openLightbox(items, startIndex) {
   next.onclick = (e) => { e.stopPropagation(); show(idx + 1, 1); };
   close.onclick = closeLightbox;
   overlay.onclick = (e) => {
-    if (e.target === overlay || e.target === stage) closeLightbox();
+    if (e.target === overlay || e.target === stage || e.target === frame) closeLightbox();
   };
   overlay._onKey = (e) => {
     if (e.key === 'ArrowLeft') show(idx - 1, -1);
